@@ -1,0 +1,117 @@
+Bu sohbette birlikte geliştirdiğimiz Pine Script sisteminin devamı için aşağıdaki bağlamı ana referans kabul et.
+
+PROJE DURUMU
+- Son referans kod seti:
+  1) OZK_Strategy_v9_9_20.pine
+  2) OZK_Indicator_v9_9_20.pine
+- GitHub repo: https://github.com/demirogluozkan-sketch/OZK-Pine-System
+- Raw linkler:
+  Strateji: https://raw.githubusercontent.com/demirogluozkan-sketch/OZK-Pine-System/refs/heads/main/OZK_Strategy_v9_9_19.pine
+  İndikatör: https://raw.githubusercontent.com/demirogluozkan-sketch/OZK-Pine-System/refs/heads/main/OZK_Indicator_v9_9_19.pine
+  (v9.9.20 dosyaları GitHub'a push edildiyse linkleri güncelle)
+
+ANA AMAÇ
+- Lean (sade) mimari
+- Deterministik davranış
+- Non-repainting / no-lookahead disiplini
+- Bar close bazlı event-driven mantık
+- Strategy ve indicator parity
+- Chop bölgelerinde gereksiz işlem azaltma
+- Audit ve dashboard ile görünürlük
+- Daha çok işlem değil, daha kaliteli işlem
+
+KORUNMASI GEREKEN PRENSİPLER
+- Lean mimari bozulmasın
+- Strategy / indicator parity korunsun
+- Repaint / lookahead olmasın
+- Raw / gated / final ayrımı bozulmasın
+- Audit görünürlüğü kaybolmasın
+- Dashboard gereksiz kalabalıklaşmasın
+- ST ana motor karakteri korunsun
+- Fazla işlem üreten agresif state tabanlı geri girişlerden kaçınılsın
+- Önce öner, sonra onay al, sonra uygula
+- ATR trailing bu projede aktif değil, yeniden ekleme
+
+ANA MİMARİ
+
+REJİM
+- regime_long_ok  = close > (use_atr_buffer ? regime_upper : regime_ema)
+- regime_short_ok = close < (use_atr_buffer ? regime_lower : regime_ema)
+
+MOTOR SEÇENEKLERİ (7 adet)
+- AT    : AlphaTrend tek başına
+- GC    : G-Channel tek başına
+- ST    : SuperTrend tek başına
+- EMA   : EMA200 tek başına
+- AT-EMA: Fiyat>AT>EMA stack (giriş), EMA hold
+- GC-EMA: Fiyat>GC>EMA stack (giriş), EMA hold
+- ST-EMA: Fiyat>ST>EMA stack (giriş), EMA hold — v9.9.20'de eklendi
+
+EXIT ÖNCELİK SIRASI
+1. Backtest bitiş kapaması
+2. ST Raw Flip Exit
+3. Regime Break Exit
+NOT: ATR Trail Exit bu projede aktif değil
+
+RAW / GATED / FINAL AYRIMI
+- raw    = sadece ham engine event (confirmed bar + flip)
+- gated  = raw + regime gate + filter gate
+- final  = gated + reentry lock + cooldown + state kontrolü
+
+CANLI KULLANIM MODELİ
+- Indicator = canlı alarm / webhook / Osmanlı emir akışı
+- Strategy  = backtest / parity analizi
+- TradingView'de 4 ayrı alarm: OZK LONG AC / LONG KAPAT / SHORT AC / SHORT KAPAT
+- Osmanlı JSON mesajı TradingView alarm penceresindeki Mesaj alanına yapıştırılır
+
+VERSİYON GEÇMİŞİ
+- v9.9.17: ADX filtresi eklendi
+- v9.9.18: Başlık güncellendi (içerik aynı)
+- v9.9.19: state_desync indikatöre eklendi, dashboard STATE DESYNC satırı eklendi
+- v9.9.20: ST-EMA motoru eklendi (7. motor seçeneği)
+
+ST-EMA MOTOR KURALLARI (v9.9.20 ile eklendi)
+- Long giriş : ST flip + Fiyat > ST > EMA200 stack
+- Short giriş: ST flip + Fiyat < ST < EMA200 stack
+- Long hold  : close > EMA200 (sadece EMA bazlı)
+- Short hold : close < EMA200 (sadece EMA bazlı)
+- Çıkış      : STEMA STOP (fiyat EMA'nın yanlış tarafına geçince)
+
+MEVCUT TEST GÖZLEM
+- 1000SHIB/USDT 15dk üzerinde test yapıldı
+- ST-EMA: kar faktörü 0.782, %32 win rate — bu sembol/TF için uygun değil
+- AT-EMA: kar faktörü 0.989 — sınırda
+- Sorun: 5-15dk kripto grafiğinde stack koşulları çok sık bozuluyor
+- Öneri: ST tek başına + ADX filtresi denenecekti (yarım kaldı)
+
+GITHUB KULLANIM
+- Repo: github.com/demirogluozkan-sketch/OZK-Pine-System (Public)
+- Her güncellemede: dosyayı klasöre koy → GitHub Desktop → commit → push
+- Commit mesajı formatı: "v9.9.21 - ne yapıldı"
+
+DASHBOARD ÖNEMLİ SATIRLAR
+- PARITY ZİNCİR : raw/gated/final akışı
+- PARITY NEDEN  : neden bloklandı
+- STATE DESYNC  : pozisyon uyumsuzluğu
+- SON BLOK      : son bloklama nedeni
+- BU BAR DURUMU : o barda ne oldu
+
+YENİ SOHBETTE ÖNCE YAPILACAK
+1. GitHub raw linklerden dosyaları oku
+2. Koda kendiliğinden müdahale etme
+3. Önce analiz et, öneri sun, onay al, sonra uygula
+4. Her değişiklikte strateji ve indikatörü birlikte güncelle
+5. Her revizyonda indirilebilir dosya ver
+
+BITMEMIŞ İŞLER
+- ST tek başına + ADX filtresi testi yapılacak (1000SHIB 15dk)
+- Win rate düşüklüğü sorunu çözülecek
+- Chop bölgelerinde işlem azaltma optimizasyonu devam edecek
+
+ÖNEMLİ UYARILAR
+- Koda kendiliğinden büyük mimari değişiklik ekleme
+- ATR trailing yeniden ekleme (kullanıcı onayı gerekir)
+- Raw / gated / final ayrımını koru
+- Non-repainting disiplinini koru
+- Strategy / indicator parity bozulmamalı
+- Dashboard gereksiz kalabalıklaşmamalı
