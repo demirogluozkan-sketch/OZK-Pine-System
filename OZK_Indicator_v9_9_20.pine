@@ -1,5 +1,5 @@
 //@version=6
-indicator("OZK Indicator v9.9.20", shorttitle="OZK IND 9.9.20", overlay=true, max_labels_count=500)
+indicator("OZK Indicator v9.9.21", shorttitle="OZK IND 9.9.21", overlay=true, max_labels_count=500)
 
 //====================================================
 // COMPAT CONSTANTS
@@ -63,7 +63,7 @@ using_ema  = motor_choice == MOTOR_EMA
 using_atema = motor_choice == MOTOR_ATEMA
 using_gcema = motor_choice == MOTOR_GCEMA
 using_stema = motor_choice == MOTOR_STEMA
-engine_label = using_at ? "AT" : using_gc ? "GC" : using_st ? "ST" : using_ema ? "EMA" : using_atema ? "AT-EMA" : "GC-EMA"
+engine_label = using_at ? "AT" : using_gc ? "GC" : using_st ? "ST" : using_ema ? "EMA" : using_atema ? "AT-EMA" : using_stema ? "ST-EMA" : "GC-EMA"
 engine_mode  = engine_label + " ANA"
 
 trade_direction = input.string(DIR_BOTH, "Trade Direction", options=[DIR_BOTH, DIR_LONG_ONLY, DIR_SHORT_ONLY], group=engine_group)
@@ -304,7 +304,7 @@ selected_motor_short_ok = using_atema ? atema_dashboard_short_ok : using_gcema ?
 primary_entry_source_label = engine_label + "_ANA"
 primary_exit_source_label  = engine_label + " REV"
 mismatch_exit_source_label = using_atema ? "ATEMA STOP" : using_gcema ? "GCEMA STOP" : using_stema ? "STEMA STOP" : MIX_EXIT_SOURCE_LABEL
-mix_detail_ema_ok_regime_fail = using_at ? MIX_DETAIL_EMA_OK_AT_FAIL : using_gc ? MIX_DETAIL_EMA_OK_GC_FAIL : using_st ? MIX_DETAIL_EMA_OK_ST_FAIL : using_ema ? MIX_DETAIL_EMA_OK_EMA_FAIL : using_atema ? MIX_DETAIL_EMA_OK_ATEMA_FAIL : MIX_DETAIL_EMA_OK_GCEMA_FAIL
+mix_detail_ema_ok_regime_fail = using_at ? MIX_DETAIL_EMA_OK_AT_FAIL : using_gc ? MIX_DETAIL_EMA_OK_GC_FAIL : using_st ? MIX_DETAIL_EMA_OK_ST_FAIL : using_ema ? MIX_DETAIL_EMA_OK_EMA_FAIL : using_atema ? MIX_DETAIL_EMA_OK_ATEMA_FAIL : using_stema ? MIX_DETAIL_EMA_OK_GCEMA_FAIL : MIX_DETAIL_EMA_OK_GCEMA_FAIL
 mix_detail_regime_ok_ema_fail = using_at ? MIX_DETAIL_AT_OK_EMA_FAIL : using_gc ? MIX_DETAIL_GC_OK_EMA_FAIL : using_st ? MIX_DETAIL_ST_OK_EMA_FAIL : using_ema ? MIX_DETAIL_EMA_MOTOR_OK_FAIL : using_atema ? MIX_DETAIL_ATEMA_OK_EMA_FAIL : MIX_DETAIL_GCEMA_OK_EMA_FAIL
 mix_detail_ema_regime_fail    = using_at ? MIX_DETAIL_EMA_AT_FAIL : using_gc ? MIX_DETAIL_EMA_GC_FAIL : using_st ? MIX_DETAIL_EMA_ST_FAIL : using_ema ? MIX_DETAIL_EMA_FAIL : using_atema ? MIX_DETAIL_EMA_ATEMA_FAIL : MIX_DETAIL_EMA_GCEMA_FAIL
 mix_exit_detail_long  = core_ema_long_ok  and not regime_long_ok  ? mix_detail_ema_ok_regime_fail : regime_long_ok  and not core_ema_long_ok  ? mix_detail_regime_ok_ema_fail : (not using_atema and not using_gcema and not using_stema and entry_side_short_seed_ok and not hybrid_short_state) ? MIX_DETAIL_OPP_PERSIST_WAIT : mix_detail_ema_regime_fail
@@ -486,7 +486,7 @@ else if regime_close_long or regime_close_short
         audit_mix_ema_regime_fail += 1
 
 if long_exit_happened
-    if regime_close_long and (mix_exit_detail_now == MIX_DETAIL_EMA_OK_AT_FAIL or mix_exit_detail_now == MIX_DETAIL_EMA_OK_GC_FAIL or mix_exit_detail_now == MIX_DETAIL_EMA_OK_ST_FAIL)
+    if regime_close_long and (mix_exit_detail_now == MIX_DETAIL_EMA_OK_AT_FAIL or mix_exit_detail_now == MIX_DETAIL_EMA_OK_GC_FAIL or mix_exit_detail_now == MIX_DETAIL_EMA_OK_ST_FAIL or mix_exit_detail_now == MIX_DETAIL_EMA_OK_GCEMA_FAIL)
         last_long_exit_price := regime_long_threshold
         long_flip_reclaim_armed := true
     else
@@ -494,7 +494,7 @@ if long_exit_happened
         long_flip_reclaim_armed := false
 
 if short_exit_happened
-    if regime_close_short and (mix_exit_detail_now == MIX_DETAIL_EMA_OK_AT_FAIL or mix_exit_detail_now == MIX_DETAIL_EMA_OK_GC_FAIL or mix_exit_detail_now == MIX_DETAIL_EMA_OK_ST_FAIL)
+    if regime_close_short and (mix_exit_detail_now == MIX_DETAIL_EMA_OK_AT_FAIL or mix_exit_detail_now == MIX_DETAIL_EMA_OK_GC_FAIL or mix_exit_detail_now == MIX_DETAIL_EMA_OK_ST_FAIL or mix_exit_detail_now == MIX_DETAIL_EMA_OK_GCEMA_FAIL)
         last_short_exit_price := regime_short_threshold
         short_flip_reclaim_armed := true
     else

@@ -1,20 +1,20 @@
 //@version=6
-strategy("OZK Lean Modular System v9.9.20", shorttitle="OZK 9.9.20", overlay=true,
-     initial_capital=1000000, currency=currency.TRY,
-     default_qty_type=strategy.fixed, default_qty_value=1, pyramiding=0,
-     process_orders_on_close=true)
+strategy("OZK Lean Modular System v9.9.21", shorttitle="OZK 9.9.21", overlay=true,
+  initial_capital=1000000, currency=currency.TRY,
+  default_qty_type=strategy.fixed, default_qty_value=1, pyramiding=0,
+  process_orders_on_close=true)
 
 //====================================================
 // COMPAT CONSTANTS
 //====================================================
-DIR_BOTH = "Both"
-DIR_LONG_ONLY = "Long Only"
+DIR_BOTH       = "Both"
+DIR_LONG_ONLY  = "Long Only"
 DIR_SHORT_ONLY = "Short Only"
 
-MOTOR_AT = "AT"
-MOTOR_GC = "GC"
-MOTOR_ST = "ST"
-MOTOR_EMA = "EMA"
+MOTOR_AT    = "AT"
+MOTOR_GC    = "GC"
+MOTOR_ST    = "ST"
+MOTOR_EMA   = "EMA"
 MOTOR_ATEMA = "AT-EMA"
 MOTOR_GCEMA = "GC-EMA"
 MOTOR_STEMA = "ST-EMA"
@@ -46,49 +46,49 @@ MIX_DETAIL_OPP_PERSIST_WAIT = "OPP_PERSIST_WAIT"
 //====================================================
 // INPUTS
 //====================================================
-regime_group  = "1. Hibrit Rejim"
-engine_group  = "2. Engine / Motor"
-filter_group  = "3. Filters"
-exit_group    = "4. Exit"
+regime_group       = "1. Hibrit Rejim"
+engine_group       = "2. Engine / Motor"
+filter_group       = "3. Filters"
+exit_group         = "4. Exit"
 continuation_group = "4A. Devam / Bekleme"
-display_group = "5. Display"
-switch_group  = "5A. Switch Board (Grafik Gosterge Ac/Kapat)"
-backtest_group = "6. Backtest Tarih Araligi"
-order_group   = "7. Order / VIOP"
-note_group    = "7A. Kullanim Notu"
+display_group      = "5. Display"
+switch_group       = "5A. Switch Board (Grafik Gosterge Ac/Kapat)"
+backtest_group     = "6. Backtest Tarih Araligi"
+order_group        = "7. Order / VIOP"
+note_group         = "7A. Kullanim Notu"
 
 trade_contracts = input.int(1, "Order Contracts", minval=1, group=order_group)
 
-use_regime_persistence = input.bool(false, "Hibrit Kalicilik Sarti", group=regime_group)
+use_regime_persistence  = input.bool(false, "Hibrit Kalicilik Sarti", group=regime_group)
 regime_persistence_bars = input.int(2, "Hibrit Kalicilik Bar Sayisi", minval=1, group=regime_group)
 
 motor_choice = input.string(MOTOR_AT, "Motor", options=[MOTOR_AT, MOTOR_GC, MOTOR_ST, MOTOR_EMA, MOTOR_ATEMA, MOTOR_GCEMA, MOTOR_STEMA], group=engine_group)
-using_at = motor_choice == MOTOR_AT
-using_gc = motor_choice == MOTOR_GC
-using_st = motor_choice == MOTOR_ST
-using_ema = motor_choice == MOTOR_EMA
+using_at    = motor_choice == MOTOR_AT
+using_gc    = motor_choice == MOTOR_GC
+using_st    = motor_choice == MOTOR_ST
+using_ema   = motor_choice == MOTOR_EMA
 using_atema = motor_choice == MOTOR_ATEMA
 using_gcema = motor_choice == MOTOR_GCEMA
 using_stema = motor_choice == MOTOR_STEMA
-engine_label = using_at ? "AT" : using_gc ? "GC" : using_st ? "ST" : using_ema ? "EMA" : using_atema ? "AT-EMA" : "GC-EMA"
+engine_label = using_at ? "AT" : using_gc ? "GC" : using_st ? "ST" : using_ema ? "EMA" : using_atema ? "AT-EMA" : using_stema ? "ST-EMA" : "GC-EMA"
 engine_mode  = engine_label + " ANA"
 
-trade_direction = input.string(DIR_BOTH, "Trade Direction", options=[DIR_BOTH, DIR_LONG_ONLY, DIR_SHORT_ONLY], group=engine_group)
+trade_direction     = input.string(DIR_BOTH, "Trade Direction", options=[DIR_BOTH, DIR_LONG_ONLY, DIR_SHORT_ONLY], group=engine_group)
 allow_long_entries  = trade_direction != DIR_SHORT_ONLY
 allow_short_entries = trade_direction != DIR_LONG_ONLY
 
-at_len           = input.int(14, "AT Periyot", minval=1, group=engine_group)
-at_mult          = input.float(3.0, "AT Katsayi", step=0.1, minval=0.1, group=engine_group)
-at_src           = input.source(close, "AT Src", group=engine_group)
+at_len            = input.int(14, "AT Periyot", minval=1, group=engine_group)
+at_mult           = input.float(3.0, "AT Katsayi", step=0.1, minval=0.1, group=engine_group)
+at_src            = input.source(close, "AT Src", group=engine_group)
 // Kivanc AlphaTrend / no-volume mantigi bu projede sabit kullanilir.
 at_no_volume_mode = true
 
-gc_len           = input.int(200, "GC Periyot", minval=2, group=engine_group)
+gc_len            = input.int(200, "GC Periyot", minval=2, group=engine_group)
 
-use_mtf_filter   = input.bool(false, "Use MTF EMA Filter", group=filter_group)
-mtf_tf           = input.timeframe("240", "MTF Timeframe", group=filter_group)
-mtf_ema_len      = input.int(200, "MTF EMA Length", minval=1, group=filter_group)
-ema_len          = input.int(200, "EMA200 Length", minval=1, group=filter_group)
+use_mtf_filter    = input.bool(false, "Use MTF EMA Filter", group=filter_group)
+mtf_tf            = input.timeframe("240", "MTF Timeframe", group=filter_group)
+mtf_ema_len       = input.int(200, "MTF EMA Length", minval=1, group=filter_group)
+ema_len           = input.int(200, "EMA200 Length", minval=1, group=filter_group)
 
 // RSI filtresi: panelde sadece ac/kapat ve confirm bar gorunur.
 // Gizli sabitler: length=14, long min=50, short max=50.
@@ -101,19 +101,18 @@ use_adx_filter        = input.bool(false, "ADX Filter", group=filter_group)
 adx_len               = input.int(14, "ADX Length", minval=1, group=filter_group)
 adx_min               = input.float(20.0, "ADX Min", minval=1.0, step=0.5, group=filter_group)
 
-st_factor       = input.float(3.0, "ST Factor", minval=0.1, step=0.1, group=engine_group)
-st_atr_len      = input.int(10, "ST ATR Length", minval=1, group=engine_group)
+st_factor             = input.float(3.0, "ST Factor", minval=0.1, step=0.1, group=engine_group)
+st_atr_len            = input.int(10, "ST ATR Length", minval=1, group=engine_group)
 
 show_gchannel_dashboard_row = false
-
 // Birlesik filter-only varyantta ikincil devam ve ilgili bekleme kontrolleri panelden kaldirildi.
 use_secondary_continuation = false
 max_setup_age_input        = 0
 entry_cooldown_bars        = 0
 
-use_backtest_window       = input.bool(false, "Use Backtest Window", group=backtest_group)
-backtest_start_time       = input.time(timestamp("2024-01-01T00:00:00"), "Backtest Start", group=backtest_group)
-backtest_end_time         = input.time(timestamp("2099-12-31T23:59:59"), "Backtest End", group=backtest_group)
+use_backtest_window   = input.bool(false, "Use Backtest Window", group=backtest_group)
+backtest_start_time   = input.time(timestamp("2024-01-01T00:00:00"), "Backtest Start", group=backtest_group)
+backtest_end_time     = input.time(timestamp("2099-12-31T23:59:59"), "Backtest End", group=backtest_group)
 
 // Mini parity test matrisi (TV import sonrasi ayni sembol / ayni timeframe ile kontrol et):
 // 1) Motor = AT, Trade Direction = Both
@@ -125,22 +124,22 @@ backtest_end_time         = input.time(timestamp("2099-12-31T23:59:59"), "Backte
 
 safe_motor_flip_exit  = true
 
-show_dashboard   = input.bool(false, "Show Dashboard", group=display_group, inline="dash1")
-dashboard_y_raw  = input.string("top", "Position Y (top/middle/bottom)", group=display_group, inline="dash1")
-dashboard_x_raw  = input.string("right", "X (left/center/right)", group=display_group, inline="dash1")
-dashboard_size_raw = input.string("Normal", "Dashboard Size (Tiny/Small/Normal/Large)", group=display_group)
-dashboard_y      = dashboard_y_raw == "middle" ? "middle" : dashboard_y_raw == "bottom" ? "bottom" : "top"
-dashboard_x      = dashboard_x_raw == "left" ? "left" : dashboard_x_raw == "center" ? "center" : "right"
-dashboard_size   = dashboard_size_raw == "Tiny" ? "Tiny" : dashboard_size_raw == "Small" ? "Small" : dashboard_size_raw == "Large" ? "Large" : "Normal"
-show_shapes      = input.bool(true, "Show Signal Shapes", group=display_group)
-show_filter_boxes= input.bool(false, "Show Filter Zones", group=display_group)
+show_dashboard      = input.bool(false, "Show Dashboard", group=display_group, inline="dash1")
+dashboard_y_raw     = input.string("top", "Position Y (top/middle/bottom)", group=display_group, inline="dash1")
+dashboard_x_raw     = input.string("right", "X (left/center/right)", group=display_group, inline="dash1")
+dashboard_size_raw  = input.string("Normal", "Dashboard Size (Tiny/Small/Normal/Large)", group=display_group)
+dashboard_y         = dashboard_y_raw == "middle" ? "middle" : dashboard_y_raw == "bottom" ? "bottom" : "top"
+dashboard_x         = dashboard_x_raw == "left" ? "left" : dashboard_x_raw == "center" ? "center" : "right"
+dashboard_size      = dashboard_size_raw == "Tiny" ? "Tiny" : dashboard_size_raw == "Small" ? "Small" : dashboard_size_raw == "Large" ? "Large" : "Normal"
+show_shapes         = input.bool(true, "Show Signal Shapes", group=display_group)
+show_filter_boxes   = input.bool(false, "Show Filter Zones", group=display_group)
 
-show_regime_ema_plot  = input.bool(true, "EMA200", group=switch_group, inline="sw1")
-show_supertrend_plot  = input.bool(false, "SuperTrend", group=switch_group, inline="sw1")
-show_mtf_ema_plot     = input.bool(false, "MTF EMA", group=switch_group, inline="sw2")
-show_motor_plot       = input.bool(true, "Unified Motor", group=switch_group, inline="sw4")
-show_at_raw_plot      = input.bool(false, "AT", group=switch_group, inline="sw4")
-show_gc_raw_plot      = input.bool(false, "GC", group=switch_group, inline="sw4")
+show_regime_ema_plot = input.bool(true, "EMA200", group=switch_group, inline="sw1")
+show_supertrend_plot = input.bool(false, "SuperTrend", group=switch_group, inline="sw1")
+show_mtf_ema_plot    = input.bool(false, "MTF EMA", group=switch_group, inline="sw2")
+show_motor_plot      = input.bool(true, "Unified Motor", group=switch_group, inline="sw4")
+show_at_raw_plot     = input.bool(false, "AT", group=switch_group, inline="sw4")
+show_gc_raw_plot     = input.bool(false, "GC", group=switch_group, inline="sw4")
 
 //====================================================
 // HELPERS
@@ -175,8 +174,8 @@ var string last_block_reason = "YOK"
 var color last_exit_bg = color.rgb(70, 70, 70)
 var string last_mix_detail = "YOK"
 
-STATE_FLAT = 0
-STATE_LONG = 1
+STATE_FLAT  = 0
+STATE_LONG  = 1
 STATE_SHORT = -1
 
 var int trade_state = STATE_FLAT
@@ -225,9 +224,9 @@ if confirmed_bar and state_desync
 [st_line, st_dir] = ta.supertrend(st_factor, st_atr_len)
 st_is_up       = st_dir < 0
 
-regime_ema   = ta.ema(close, ema_len)
-ema_regime_slope = ta.sma(regime_ema - regime_ema[1], 3)
-ema_slope_long_ok = ema_regime_slope > 0
+regime_ema         = ta.ema(close, ema_len)
+ema_regime_slope   = ta.sma(regime_ema - regime_ema[1], 3)
+ema_slope_long_ok  = ema_regime_slope > 0
 ema_slope_short_ok = ema_regime_slope < 0
 
 at_atr             = ta.sma(ta.tr, at_len)
@@ -253,6 +252,7 @@ regime_short_threshold = engine_plot_line
 regime_long_ok  = close > regime_long_threshold
 regime_short_ok = close < regime_short_threshold
 regime_state    = regime_long_ok ? "LONG" : regime_short_ok ? "SHORT" : "NEUTRAL"
+
 // EMA motor secildiginde EMA200 ayni anda hem motor hem de rejim filtresi oldugu icin
 // cift sayimi onlemek adina core EMA gate otomatik bypass edilir.
 core_ema_long_ok  = using_ema ? true : close > regime_ema
@@ -268,19 +268,19 @@ gcema_short_entry_ok = regime_short_ok and core_ema_short_ok and gcema_line < re
 // ST-EMA: Fiyat > ST > EMA200 stack (giriş), sadece EMA200 bazlı hold
 stema_long_entry_ok  = regime_long_ok and core_ema_long_ok and st_line > regime_ema
 stema_short_entry_ok = regime_short_ok and core_ema_short_ok and st_line < regime_ema
+
 // ATEMA hard-hold modeli bilincli olarak asimetriktir:
-// Entry icin AT’nin EMA’nin dogru tarafinda stack onayi gerekir.
+// Entry icin AT'nin EMA'nin dogru tarafinda stack onayi gerekir.
 // Pozisyon acildiktan sonra hold/stop yalnizca EMA bazlidir; bu sayede gereksiz erken cikislar azaltilir.
 atema_long_hold_ok   = close > regime_ema
 atema_short_hold_ok  = close < regime_ema
 // GCEMA da ayni aileyi takip eder:
-// Entry icin Close > GC > EMA veya Close < GC < EMA stack onayi gerekir.
-// Pozisyon acildiktan sonra hold/stop yalnizca EMA bazlidir.
 gcema_long_hold_ok   = close > regime_ema
 gcema_short_hold_ok  = close < regime_ema
 // ST-EMA hold: sadece EMA200 bazlı
 stema_long_hold_ok   = close > regime_ema
 stema_short_hold_ok  = close < regime_ema
+
 atema_dashboard_long_ok  = atema_long_entry_ok or (trade_state == STATE_LONG and atema_long_hold_ok and not atema_short_entry_ok)
 atema_dashboard_short_ok = atema_short_entry_ok or (trade_state == STATE_SHORT and atema_short_hold_ok and not atema_long_entry_ok)
 gcema_dashboard_long_ok  = gcema_long_entry_ok or (trade_state == STATE_LONG and gcema_long_hold_ok and not gcema_short_entry_ok)
@@ -288,62 +288,56 @@ gcema_dashboard_short_ok = gcema_short_entry_ok or (trade_state == STATE_SHORT a
 stema_dashboard_long_ok  = stema_long_entry_ok or (trade_state == STATE_LONG and stema_long_hold_ok and not stema_short_entry_ok)
 stema_dashboard_short_ok = stema_short_entry_ok or (trade_state == STATE_SHORT and stema_short_hold_ok and not stema_long_entry_ok)
 
-// AT-EMA / GC-EMA stack filtresi sadece dashboard degil, gercek entry/persistence zincirini de beslemelidir.
+// AT-EMA / GC-EMA / ST-EMA stack filtresi sadece dashboard degil, gercek entry/persistence zincirini de beslemelidir.
 entry_side_long_seed_ok  = using_atema ? atema_long_entry_ok : using_gcema ? gcema_long_entry_ok : using_stema ? stema_long_entry_ok : entry_side_long_base_ok
 entry_side_short_seed_ok = using_atema ? atema_short_entry_ok : using_gcema ? gcema_short_entry_ok : using_stema ? stema_short_entry_ok : entry_side_short_base_ok
 
 var int hybrid_long_hold_bars = 0
 var int hybrid_short_hold_bars = 0
-hybrid_long_hold_bars := entry_side_long_seed_ok ? nz(hybrid_long_hold_bars[1]) + 1 : 0
+hybrid_long_hold_bars  := entry_side_long_seed_ok  ? nz(hybrid_long_hold_bars[1])  + 1 : 0
 hybrid_short_hold_bars := entry_side_short_seed_ok ? nz(hybrid_short_hold_bars[1]) + 1 : 0
 
-hybrid_long_persist_ok = not use_regime_persistence or hybrid_long_hold_bars >= regime_persistence_bars
+hybrid_long_persist_ok  = not use_regime_persistence or hybrid_long_hold_bars  >= regime_persistence_bars
 hybrid_short_persist_ok = not use_regime_persistence or hybrid_short_hold_bars >= regime_persistence_bars
-
-hybrid_long_persist_event  = confirmed_bar and use_regime_persistence and hybrid_long_hold_bars >= regime_persistence_bars and nz(hybrid_long_hold_bars[1]) < regime_persistence_bars
+hybrid_long_persist_event  = confirmed_bar and use_regime_persistence and hybrid_long_hold_bars  >= regime_persistence_bars and nz(hybrid_long_hold_bars[1])  < regime_persistence_bars
 hybrid_short_persist_event = confirmed_bar and use_regime_persistence and hybrid_short_hold_bars >= regime_persistence_bars and nz(hybrid_short_hold_bars[1]) < regime_persistence_bars
-
-entry_side_long_ok  = entry_side_long_seed_ok and hybrid_long_persist_ok
+entry_side_long_ok  = entry_side_long_seed_ok  and hybrid_long_persist_ok
 entry_side_short_ok = entry_side_short_seed_ok and hybrid_short_persist_ok
 regime_persistence_text = not use_regime_persistence ? "KAPALI" : entry_side_long_seed_ok ? "LONG " + str.tostring(math.min(hybrid_long_hold_bars, regime_persistence_bars)) + "/" + str.tostring(regime_persistence_bars) : entry_side_short_seed_ok ? "SHORT " + str.tostring(math.min(hybrid_short_hold_bars, regime_persistence_bars)) + "/" + str.tostring(regime_persistence_bars) : "NOTR 0/" + str.tostring(regime_persistence_bars)
 regime_persistence_bg = not use_regime_persistence ? color.rgb(70, 70, 70) : entry_side_long_ok ? color.rgb(20, 115, 60) : entry_side_short_ok ? color.rgb(150, 35, 35) : (entry_side_long_seed_ok or entry_side_short_seed_ok) ? color.rgb(160, 110, 20) : color.rgb(70, 70, 70)
 
-hybrid_long_state = entry_side_long_ok
+hybrid_long_state  = entry_side_long_ok
 hybrid_short_state = entry_side_short_ok
-hybrid_long_prev = bar_index > 0 ? hybrid_long_state[1] : false
-hybrid_short_prev = bar_index > 0 ? hybrid_short_state[1] : false
-selected_motor_long_ok = using_atema ? atema_dashboard_long_ok : using_gcema ? gcema_dashboard_long_ok : using_stema ? stema_dashboard_long_ok : hybrid_long_state
+hybrid_long_prev   = bar_index > 0 ? hybrid_long_state[1]  : false
+hybrid_short_prev  = bar_index > 0 ? hybrid_short_state[1] : false
+selected_motor_long_ok  = using_atema ? atema_dashboard_long_ok  : using_gcema ? gcema_dashboard_long_ok  : using_stema ? stema_dashboard_long_ok  : hybrid_long_state
 selected_motor_short_ok = using_atema ? atema_dashboard_short_ok : using_gcema ? gcema_dashboard_short_ok : using_stema ? stema_dashboard_short_ok : hybrid_short_state
 
 primary_entry_source_label = engine_label + "_ANA"
 primary_exit_source_label  = engine_label + " REV"
 mismatch_exit_source_label = using_atema ? "ATEMA STOP" : using_gcema ? "GCEMA STOP" : using_stema ? "STEMA STOP" : MIX_EXIT_SOURCE_LABEL
-mix_detail_ema_ok_regime_fail = using_at ? MIX_DETAIL_EMA_OK_AT_FAIL : using_gc ? MIX_DETAIL_EMA_OK_GC_FAIL : using_st ? MIX_DETAIL_EMA_OK_ST_FAIL : using_ema ? MIX_DETAIL_EMA_OK_EMA_FAIL : using_atema ? MIX_DETAIL_EMA_OK_ATEMA_FAIL : MIX_DETAIL_EMA_OK_GCEMA_FAIL
+mix_detail_ema_ok_regime_fail = using_at ? MIX_DETAIL_EMA_OK_AT_FAIL : using_gc ? MIX_DETAIL_EMA_OK_GC_FAIL : using_st ? MIX_DETAIL_EMA_OK_ST_FAIL : using_ema ? MIX_DETAIL_EMA_OK_EMA_FAIL : using_atema ? MIX_DETAIL_EMA_OK_ATEMA_FAIL : using_stema ? MIX_DETAIL_EMA_OK_GCEMA_FAIL : MIX_DETAIL_EMA_OK_GCEMA_FAIL
 mix_detail_regime_ok_ema_fail = using_at ? MIX_DETAIL_AT_OK_EMA_FAIL : using_gc ? MIX_DETAIL_GC_OK_EMA_FAIL : using_st ? MIX_DETAIL_ST_OK_EMA_FAIL : using_ema ? MIX_DETAIL_EMA_MOTOR_OK_FAIL : using_atema ? MIX_DETAIL_ATEMA_OK_EMA_FAIL : MIX_DETAIL_GCEMA_OK_EMA_FAIL
 mix_detail_ema_regime_fail    = using_at ? MIX_DETAIL_EMA_AT_FAIL : using_gc ? MIX_DETAIL_EMA_GC_FAIL : using_st ? MIX_DETAIL_EMA_ST_FAIL : using_ema ? MIX_DETAIL_EMA_FAIL : using_atema ? MIX_DETAIL_EMA_ATEMA_FAIL : MIX_DETAIL_EMA_GCEMA_FAIL
-mix_exit_detail_long = core_ema_long_ok and not regime_long_ok ? mix_detail_ema_ok_regime_fail : regime_long_ok and not core_ema_long_ok ? mix_detail_regime_ok_ema_fail : (not using_atema and not using_gcema and entry_side_short_seed_ok and not hybrid_short_state) ? MIX_DETAIL_OPP_PERSIST_WAIT : mix_detail_ema_regime_fail
-mix_exit_detail_short = core_ema_short_ok and not regime_short_ok ? mix_detail_ema_ok_regime_fail : regime_short_ok and not core_ema_short_ok ? mix_detail_regime_ok_ema_fail : (not using_atema and not using_gcema and entry_side_long_seed_ok and not hybrid_long_state) ? MIX_DETAIL_OPP_PERSIST_WAIT : mix_detail_ema_regime_fail
-engine_long_primary  = confirmed_bar and hybrid_long_state and not hybrid_long_prev
+mix_exit_detail_long  = core_ema_long_ok  and not regime_long_ok  ? mix_detail_ema_ok_regime_fail : regime_long_ok  and not core_ema_long_ok  ? mix_detail_regime_ok_ema_fail : (not using_atema and not using_gcema and not using_stema and entry_side_short_seed_ok and not hybrid_short_state) ? MIX_DETAIL_OPP_PERSIST_WAIT : mix_detail_ema_regime_fail
+mix_exit_detail_short = core_ema_short_ok and not regime_short_ok ? mix_detail_ema_ok_regime_fail : regime_short_ok and not core_ema_short_ok ? mix_detail_regime_ok_ema_fail : (not using_atema and not using_gcema and not using_stema and entry_side_long_seed_ok  and not hybrid_long_state)  ? MIX_DETAIL_OPP_PERSIST_WAIT : mix_detail_ema_regime_fail
+
+engine_long_primary  = confirmed_bar and hybrid_long_state  and not hybrid_long_prev
 engine_short_primary = confirmed_bar and hybrid_short_state and not hybrid_short_prev
 entry_regime_long_ok  = entry_side_long_ok
 entry_regime_short_ok = entry_side_short_ok
 
-// Reclaim arming kurali:
-// Sadece HIBRIT MIX exit durumunda, EMA tarafi halen gecerlidir ama secili motorun rejim tarafi bozulursa
-// reclaim arm edilir (EMA_OK_AT_FAIL / EMA_OK_GC_FAIL). OPP_PERSIST_WAIT, EMA_AT_FAIL,
-// EMA_GC_FAIL, primary reverse veya TP kaynakli kapanislar reclaim arm etmez.
-regime_cross_long = ta.crossover(close, regime_long_threshold)
+// Reclaim arming kurali
+regime_cross_long  = ta.crossover(close,  regime_long_threshold)
 regime_cross_short = ta.crossunder(close, regime_short_threshold)
-
-reclaim_cross_long = long_flip_reclaim_armed and not na(last_long_exit_price) and close[1] <= last_long_exit_price and close > last_long_exit_price
+reclaim_cross_long  = long_flip_reclaim_armed  and not na(last_long_exit_price)  and close[1] <= last_long_exit_price  and close > last_long_exit_price
 reclaim_cross_short = short_flip_reclaim_armed and not na(last_short_exit_price) and close[1] >= last_short_exit_price and close < last_short_exit_price
-reclaim_long_direction_ok = entry_side_long_ok
+reclaim_long_direction_ok  = entry_side_long_ok
 reclaim_short_direction_ok = entry_side_short_ok
-
-engine_long_reclaim_cont = confirmed_bar and reclaim_cross_long and reclaim_long_direction_ok
+engine_long_reclaim_cont  = confirmed_bar and reclaim_cross_long  and reclaim_long_direction_ok
 engine_short_reclaim_cont = confirmed_bar and reclaim_cross_short and reclaim_short_direction_ok
-ema_cont_long_core   = false
-ema_cont_short_core  = false
+ema_cont_long_core  = false
+ema_cont_short_core = false
 
 if confirmed_bar
     if engine_short_primary
@@ -352,7 +346,6 @@ if confirmed_bar
         long_setup_age += 1
         if long_setup_age > setup_memory_after_bars
             long_setup_age := na
-
     if engine_long_primary
         short_setup_age := na
     else if not na(short_setup_age)
@@ -362,42 +355,40 @@ if confirmed_bar
 
 engine_long_event  = engine_long_primary
 engine_short_event = engine_short_primary
-motor_state = engine_label + " / " + (selected_motor_long_ok ? "LONG" : selected_motor_short_ok ? "SHORT" : "MIX")
+motor_state    = engine_label + " / " + (selected_motor_long_ok ? "LONG" : selected_motor_short_ok ? "SHORT" : "MIX")
 motor_state_bg = selected_motor_long_ok ? color.rgb(20, 140, 95) : selected_motor_short_ok ? color.rgb(150, 35, 35) : color.rgb(70, 70, 70)
-at_long_ok = close > at_line
+at_long_ok  = close > at_line
 at_short_ok = close < at_line
-gc_long_ok = close > gc_mid
+gc_long_ok  = close > gc_mid
 gc_short_ok = close < gc_mid
-st_long_ok = st_is_up
+st_long_ok  = st_is_up
 st_short_ok = not st_is_up
-ema_motor_long_ok = close > regime_ema
+ema_motor_long_ok  = close > regime_ema
 ema_motor_short_ok = close < regime_ema
-gcema_motor_long_ok = gcema_dashboard_long_ok
+gcema_motor_long_ok  = gcema_dashboard_long_ok
 gcema_motor_short_ok = gcema_dashboard_short_ok
-at_motor_state = motor_dash_text("AT", using_at, at_long_ok, at_short_ok)
-gc_motor_state = motor_dash_text("GC", using_gc, gc_long_ok, gc_short_ok)
-st_motor_state = motor_dash_text("ST", using_st, st_long_ok, st_short_ok)
-ema_motor_state = motor_dash_text("EMA", using_ema, ema_motor_long_ok, ema_motor_short_ok)
+at_motor_state    = motor_dash_text("AT",     using_at,    at_long_ok,              at_short_ok)
+gc_motor_state    = motor_dash_text("GC",     using_gc,    gc_long_ok,              gc_short_ok)
+st_motor_state    = motor_dash_text("ST",     using_st,    st_long_ok,              st_short_ok)
+ema_motor_state   = motor_dash_text("EMA",    using_ema,   ema_motor_long_ok,       ema_motor_short_ok)
 atema_motor_state = motor_dash_text("AT-EMA", using_atema, atema_dashboard_long_ok, atema_dashboard_short_ok)
-gcema_motor_state = motor_dash_text("GC-EMA", using_gcema, gcema_motor_long_ok, gcema_motor_short_ok)
+gcema_motor_state = motor_dash_text("GC-EMA", using_gcema, gcema_motor_long_ok,     gcema_motor_short_ok)
 stema_motor_state = motor_dash_text("ST-EMA", using_stema, stema_dashboard_long_ok, stema_dashboard_short_ok)
-at_motor_bg = motor_dash_bg(using_at, at_long_ok, at_short_ok)
-gc_motor_bg = motor_dash_bg(using_gc, gc_long_ok, gc_short_ok)
-st_motor_bg = motor_dash_bg(using_st, st_long_ok, st_short_ok)
-ema_motor_bg = motor_dash_bg(using_ema, ema_motor_long_ok, ema_motor_short_ok)
+at_motor_bg    = motor_dash_bg(using_at,    at_long_ok,              at_short_ok)
+gc_motor_bg    = motor_dash_bg(using_gc,    gc_long_ok,              gc_short_ok)
+st_motor_bg    = motor_dash_bg(using_st,    st_long_ok,              st_short_ok)
+ema_motor_bg   = motor_dash_bg(using_ema,   ema_motor_long_ok,       ema_motor_short_ok)
 atema_motor_bg = motor_dash_bg(using_atema, atema_dashboard_long_ok, atema_dashboard_short_ok)
-gcema_motor_bg = motor_dash_bg(using_gcema, gcema_motor_long_ok, gcema_motor_short_ok)
+gcema_motor_bg = motor_dash_bg(using_gcema, gcema_motor_long_ok,     gcema_motor_short_ok)
 stema_motor_bg = motor_dash_bg(using_stema, stema_dashboard_long_ok, stema_dashboard_short_ok)
 
 //====================================================
 // FILTERS
 //====================================================
-// Onayli HTF kalite filtresi: filtre yalnizca chart timeframe'den buyuk HTF secimlerinde aktif olur.
-// HTF close/EMA serileri request.security() icinde bir bar offset ve lookahead_on ile son onayli HTF degerinden okunur.
-chart_tf_seconds = timeframe.in_seconds(timeframe.period)
-mtf_tf_seconds   = timeframe.in_seconds(mtf_tf)
+chart_tf_seconds  = timeframe.in_seconds(timeframe.period)
+mtf_tf_seconds    = timeframe.in_seconds(mtf_tf)
 mtf_filter_active = use_mtf_filter and mtf_tf_seconds > chart_tf_seconds
-mtf_close = request.security(syminfo.tickerid, mtf_tf, close[1], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_on)
+mtf_close = request.security(syminfo.tickerid, mtf_tf, close[1],              gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_on)
 mtf_ema   = request.security(syminfo.tickerid, mtf_tf, ta.ema(close, mtf_ema_len)[1], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_on)
 mtf_long_ok  = not mtf_filter_active ? true : mtf_close > mtf_ema
 mtf_short_ok = not mtf_filter_active ? true : mtf_close < mtf_ema
@@ -409,121 +400,103 @@ gchannel_filter_short_ok = true
 rsi_filter_value   = ta.rsi(close, rsi_filter_len)
 var int rsi_above_bars = 0
 var int rsi_below_bars = 0
-rsi_above_bars := rsi_filter_value > rsi_long_min ? nz(rsi_above_bars[1]) + 1 : 0
+rsi_above_bars := rsi_filter_value > rsi_long_min  ? nz(rsi_above_bars[1]) + 1 : 0
 rsi_below_bars := rsi_filter_value < rsi_short_max ? nz(rsi_below_bars[1]) + 1 : 0
-rsi_filter_long_ok = not use_rsi_filter ? true : rsi_above_bars >= rsi_confirm_bars
+rsi_filter_long_ok  = not use_rsi_filter ? true : rsi_above_bars >= rsi_confirm_bars
 rsi_filter_short_ok = not use_rsi_filter ? true : rsi_below_bars >= rsi_confirm_bars
 [_adx_plus, _adx_minus, adx_value] = ta.dmi(adx_len, adx_len)
 adx_filter_ok = not use_adx_filter ? true : adx_value >= adx_min
 
-all_long_filters_ok  = mtf_long_ok and rsi_filter_long_ok and adx_filter_ok
+all_long_filters_ok  = mtf_long_ok  and rsi_filter_long_ok  and adx_filter_ok
 all_short_filters_ok = mtf_short_ok and rsi_filter_short_ok and adx_filter_ok
-
 active_filter_count = (mtf_filter_active ? 1 : 0) + (use_rsi_filter ? 1 : 0) + (use_adx_filter ? 1 : 0)
-config_safe = active_filter_count <= 3
+config_safe  = active_filter_count <= 3
 config_state = config_safe ? "GUVENLI" : "OVERFIT RISK"
 
 //====================================================
 // DIRECT EVENT SIGNALS (LEAN)
-// revAZ: parity dosyasi Version A hibrit motor ile indicator tarafiyla senklendi.
 //====================================================
-// Hibrit motor revA: primary olay dogrudan dual-state gecisidir.
-// Reclaim framework: mix-exit sonrasi secili motor stop reclaim girisi aktif; primary girisi bloke etmez.
 long_primary_reclaim_ok  = true
 short_primary_reclaim_ok = true
-
-// Ham engine sinyali: yalnizca primary flip ve geri-kazanim devam eventleri kullanilir.
-raw_long_signal  = confirmed_bar and ((engine_long_primary and long_primary_reclaim_ok) or engine_long_reclaim_cont)
+raw_long_signal  = confirmed_bar and ((engine_long_primary  and long_primary_reclaim_ok)  or engine_long_reclaim_cont)
 raw_short_signal = confirmed_bar and ((engine_short_primary and short_primary_reclaim_ok) or engine_short_reclaim_cont)
-
-// Giris kapisi: tum long/short girisleri secili motor + EMA200 ayni taraf onayi ister
 long_regime_gate_ok  = entry_side_long_ok
 short_regime_gate_ok = entry_side_short_ok
-
-// Filtre + secili motor giris modelinden gecmis aday sinyal
-gated_long_signal  = raw_long_signal and long_regime_gate_ok and all_long_filters_ok
+gated_long_signal  = raw_long_signal  and long_regime_gate_ok  and all_long_filters_ok
 gated_short_signal = raw_short_signal and short_regime_gate_ok and all_short_filters_ok
-
-// Son giris oncesi bloklar
 long_reentry_ok  = true
 short_reentry_ok = true
 cooldown_ok      = na(last_exit_bar) or (bar_index - last_exit_bar > entry_cooldown_bars)
 
 backtest_window_enabled = use_backtest_window
-in_backtest_window = not backtest_window_enabled or (time >= backtest_start_time and time <= backtest_end_time)
+in_backtest_window  = not backtest_window_enabled or (time >= backtest_start_time and time <= backtest_end_time)
 backtest_window_ended = backtest_window_enabled and time > backtest_end_time
 
-// Final giris sinyali
-long_signal_base  = gated_long_signal and long_reentry_ok and cooldown_ok and in_backtest_window
+long_signal_base  = gated_long_signal  and long_reentry_ok  and cooldown_ok and in_backtest_window
 short_signal_base = gated_short_signal and short_reentry_ok and cooldown_ok and in_backtest_window
-long_signal  = long_signal_base and allow_long_entries
+long_signal  = long_signal_base  and allow_long_entries
 short_signal = short_signal_base and allow_short_entries
 
 //====================================================
 // DEBUG SIGNAL PATH
 //====================================================
-dbg_raw_long      = raw_long_signal
-dbg_raw_short     = raw_short_signal
-dbg_final_long    = long_signal
-dbg_final_short   = short_signal
-dbg_reentry_block_long  = gated_long_signal and not long_reentry_ok
+dbg_raw_long   = raw_long_signal
+dbg_raw_short  = raw_short_signal
+dbg_final_long = long_signal
+dbg_final_short = short_signal
+dbg_reentry_block_long  = gated_long_signal  and not long_reentry_ok
 dbg_reentry_block_short = gated_short_signal and not short_reentry_ok
-dbg_cooldown_block_long  = gated_long_signal and long_reentry_ok and not cooldown_ok
+dbg_cooldown_block_long  = gated_long_signal  and long_reentry_ok  and not cooldown_ok
 dbg_cooldown_block_short = gated_short_signal and short_reentry_ok and not cooldown_ok
-dbg_regime_persist_block_long  = raw_long_signal and entry_side_long_seed_ok and not entry_side_long_ok
+dbg_regime_persist_block_long  = raw_long_signal  and entry_side_long_seed_ok  and not entry_side_long_ok
 dbg_regime_persist_block_short = raw_short_signal and entry_side_short_seed_ok and not entry_side_short_ok
-dbg_regime_block_long    = raw_long_signal and not long_regime_gate_ok and not dbg_regime_persist_block_long
-dbg_regime_block_short   = raw_short_signal and not short_regime_gate_ok and not dbg_regime_persist_block_short
-dbg_filter_block_long    = raw_long_signal and long_regime_gate_ok and not all_long_filters_ok
-dbg_filter_block_short   = raw_short_signal and short_regime_gate_ok and not all_short_filters_ok
-dbg_reclaim_block_long   = confirmed_bar and engine_long_primary and not long_primary_reclaim_ok
-dbg_reclaim_block_short  = confirmed_bar and engine_short_primary and not short_primary_reclaim_ok
+dbg_regime_block_long  = raw_long_signal  and not long_regime_gate_ok  and not dbg_regime_persist_block_long
+dbg_regime_block_short = raw_short_signal and not short_regime_gate_ok and not dbg_regime_persist_block_short
+dbg_filter_block_long  = raw_long_signal  and long_regime_gate_ok  and not all_long_filters_ok
+dbg_filter_block_short = raw_short_signal and short_regime_gate_ok and not all_short_filters_ok
+dbg_reclaim_block_long  = confirmed_bar and engine_long_primary  and not long_primary_reclaim_ok
+dbg_reclaim_block_short = confirmed_bar and engine_short_primary and not short_primary_reclaim_ok
 
-pending_long = false
+pending_long  = false
 pending_short = false
-pending_long_bars = na(long_setup_age) ? 0 : long_setup_age
+pending_long_bars  = na(long_setup_age)  ? 0 : long_setup_age
 pending_short_bars = na(short_setup_age) ? 0 : short_setup_age
 cooldown_left = na(last_exit_bar) ? 0 : math.max(0, entry_cooldown_bars + 1 - (bar_index - last_exit_bar))
 
 //====================================================
 // PRE-CALC POSITION STATE
 //====================================================
-in_long_before    = trade_state == STATE_LONG
-in_short_before   = trade_state == STATE_SHORT
-flat_before       = trade_state == STATE_FLAT
-// Current position state aliases for visuals/debug.
-in_long           = trade_state == STATE_LONG
-in_short          = trade_state == STATE_SHORT
-position_state    = in_long ? "LONG" : in_short ? "SHORT" : "BOS"
+in_long_before  = trade_state == STATE_LONG
+in_short_before = trade_state == STATE_SHORT
+flat_before     = trade_state == STATE_FLAT
+in_long  = trade_state == STATE_LONG
+in_short = trade_state == STATE_SHORT
+position_state = in_long ? "LONG" : in_short ? "SHORT" : "BOS"
 
-// Motor-bazli exit: karsi hibrit final-eventte reversal/close uretilir.
-// Uyusmazlikta veya tek tarafli kirilimda mevcut pozisyon flat'e kapanir.
-engine_opposite_long   = in_long_before and engine_short_primary and short_signal_base
-engine_opposite_short  = in_short_before and engine_long_primary and long_signal_base
+engine_opposite_long  = in_long_before  and engine_short_primary and short_signal_base
+engine_opposite_short = in_short_before and engine_long_primary  and long_signal_base
 motor_opposite_long  = engine_opposite_long
 motor_opposite_short = engine_opposite_short
-hybrid_mismatch_long  = confirmed_bar and in_long_before and not hybrid_long_state and not hybrid_short_state
+hybrid_mismatch_long  = confirmed_bar and in_long_before  and not hybrid_long_state  and not hybrid_short_state
 hybrid_mismatch_short = confirmed_bar and in_short_before and not hybrid_short_state and not hybrid_long_state
-atema_stop_long  = confirmed_bar and using_atema and in_long_before and not atema_long_hold_ok
+atema_stop_long  = confirmed_bar and using_atema and in_long_before  and not atema_long_hold_ok
 atema_stop_short = confirmed_bar and using_atema and in_short_before and not atema_short_hold_ok
-gcema_stop_long  = confirmed_bar and using_gcema and in_long_before and not gcema_long_hold_ok
+gcema_stop_long  = confirmed_bar and using_gcema and in_long_before  and not gcema_long_hold_ok
 gcema_stop_short = confirmed_bar and using_gcema and in_short_before and not gcema_short_hold_ok
-stema_stop_long  = confirmed_bar and using_stema and in_long_before and not stema_long_hold_ok
+stema_stop_long  = confirmed_bar and using_stema and in_long_before  and not stema_long_hold_ok
 stema_stop_short = confirmed_bar and using_stema and in_short_before and not stema_short_hold_ok
 reverse_close_long  = safe_motor_flip_exit and motor_opposite_long
 reverse_close_short = safe_motor_flip_exit and motor_opposite_short
-regime_close_long   = using_atema ? (atema_stop_long and not reverse_close_long) : using_gcema ? (gcema_stop_long and not reverse_close_long) : using_stema ? (stema_stop_long and not reverse_close_long) : hybrid_mismatch_long
-regime_close_short  = using_atema ? (atema_stop_short and not reverse_close_short) : using_gcema ? (gcema_stop_short and not reverse_close_short) : using_stema ? (stema_stop_short and not reverse_close_short) : hybrid_mismatch_short
-mix_exit_detail_now = regime_close_long ? mix_exit_detail_long : regime_close_short ? mix_exit_detail_short : "YOK"
-allow_long_reversal  = allow_long_entries and in_short_before and engine_long_primary and long_signal_base
-allow_short_reversal = allow_short_entries and in_long_before and engine_short_primary and short_signal_base
-just_closed_this_bar = reverse_close_long or reverse_close_short or regime_close_long or regime_close_short
-long_exit_happened  = reverse_close_long or regime_close_long
-short_exit_happened = reverse_close_short or regime_close_short
+regime_close_long  = using_atema ? (atema_stop_long  and not reverse_close_long)  : using_gcema ? (gcema_stop_long  and not reverse_close_long)  : using_stema ? (stema_stop_long  and not reverse_close_long)  : hybrid_mismatch_long
+regime_close_short = using_atema ? (atema_stop_short and not reverse_close_short) : using_gcema ? (gcema_stop_short and not reverse_close_short) : using_stema ? (stema_stop_short and not reverse_close_short) : hybrid_mismatch_short
 
-// Profit-exit etiketi yalnizca audit/re-entry reset sinyalidir; resmi performans metrigi degildir.
-// strategy.position_avg_price bazli bu siniflandirma komisyon/slippage etkilerini birebir yansitmayabilir.
-long_profit_exit  = in_long_before and just_closed_this_bar and close > strategy.position_avg_price
+mix_exit_detail_now = regime_close_long ? mix_exit_detail_long : regime_close_short ? mix_exit_detail_short : "YOK"
+allow_long_reversal  = allow_long_entries  and in_short_before and engine_long_primary  and long_signal_base
+allow_short_reversal = allow_short_entries and in_long_before  and engine_short_primary and short_signal_base
+just_closed_this_bar = reverse_close_long or reverse_close_short or regime_close_long or regime_close_short
+long_exit_happened   = reverse_close_long  or regime_close_long
+short_exit_happened  = reverse_close_short or regime_close_short
+long_profit_exit  = in_long_before  and just_closed_this_bar and close > strategy.position_avg_price
 short_profit_exit = in_short_before and just_closed_this_bar and close < strategy.position_avg_price
 
 if reverse_close_long or reverse_close_short
@@ -602,7 +575,6 @@ if short_reentry_lock and regime_long_ok
     short_reentry_level := na
     short_tp_wait_reset := false
 
-// Armed reclaim, ters baz kosul geri geldiginde stale state tasimamasi icin iptal edilir.
 if long_flip_reclaim_armed and entry_side_short_seed_ok
     long_flip_reclaim_armed := false
     last_long_exit_price := na
@@ -625,6 +597,7 @@ if backtest_window_ended and strategy.position_size != 0 and not exit_happened
 if reverse_close_long and not exit_happened
     strategy.close("Long", comment=primary_exit_source_label + " EXIT")
     exit_happened := true
+
 if reverse_close_short and not exit_happened
     strategy.close("Short", comment=primary_exit_source_label + " EXIT")
     exit_happened := true
@@ -632,6 +605,7 @@ if reverse_close_short and not exit_happened
 if regime_close_long and not exit_happened
     strategy.close("Long", comment=using_atema ? "ATEMA STOP" : using_gcema ? "GCEMA STOP" : using_stema ? "STEMA STOP" : "HIBRIT MIX EXIT")
     exit_happened := true
+
 if regime_close_short and not exit_happened
     strategy.close("Short", comment=using_atema ? "ATEMA STOP" : using_gcema ? "GCEMA STOP" : using_stema ? "STEMA STOP" : "HIBRIT MIX EXIT")
     exit_happened := true
@@ -652,16 +626,14 @@ if exit_happened
         last_short_exit_price := na
 
 entry_flat_now = trade_state == STATE_FLAT
-
-fire_long_reversal = allow_long_reversal
+fire_long_reversal  = allow_long_reversal
 fire_short_reversal = allow_short_reversal
-fire_long_flat = long_signal and entry_flat_now and not exit_happened and not fire_long_reversal and not fire_short_reversal
-fire_short_flat = short_signal and entry_flat_now and not exit_happened and not fire_long_reversal and not fire_short_reversal
-
-plot_long_entry  = fire_long_reversal or fire_long_flat
+fire_long_flat  = long_signal  and entry_flat_now and not exit_happened and not fire_long_reversal  and not fire_short_reversal
+fire_short_flat = short_signal and entry_flat_now and not exit_happened and not fire_long_reversal  and not fire_short_reversal
+plot_long_entry  = fire_long_reversal  or fire_long_flat
 plot_short_entry = fire_short_reversal or fire_short_flat
 
-dbg_state_block_long  = gated_long_signal and long_reentry_ok and cooldown_ok and (not entry_flat_now or (exit_happened and not fire_long_reversal))
+dbg_state_block_long  = gated_long_signal  and long_reentry_ok  and cooldown_ok and (not entry_flat_now or (exit_happened and not fire_long_reversal))
 dbg_state_block_short = gated_short_signal and short_reentry_ok and cooldown_ok and (not entry_flat_now or (exit_happened and not fire_short_reversal))
 
 block_reason_now = dbg_reclaim_block_long or dbg_reclaim_block_short ? "RECLAIM" : dbg_regime_persist_block_long or dbg_regime_persist_block_short ? "KALICILIK" : dbg_regime_block_long or dbg_regime_block_short ? "REJIM" : dbg_filter_block_long or dbg_filter_block_short ? "FILTRE" : dbg_reentry_block_long or dbg_reentry_block_short ? "RE-ENTRY" : dbg_cooldown_block_long or dbg_cooldown_block_short ? "COOLDOWN" : dbg_state_block_long or dbg_state_block_short ? "STATE" : "YOK"
@@ -669,20 +641,20 @@ if confirmed_bar and block_reason_now != "YOK"
     last_block_reason := block_reason_now
 
 reentry_state = long_reentry_lock and short_reentry_lock ? "L+S" : long_reentry_lock ? "LONG" : short_reentry_lock ? "SHORT" : "YOK"
-long_entry_source_now = engine_long_primary ? primary_entry_source_label : engine_long_reclaim_cont ? "GERI_KAZANIM" : "YOK"
+long_entry_source_now  = engine_long_primary  ? primary_entry_source_label : engine_long_reclaim_cont  ? "GERI_KAZANIM" : "YOK"
 short_entry_source_now = engine_short_primary ? primary_entry_source_label : engine_short_reclaim_cont ? "GERI_KAZANIM" : "YOK"
 bar_status_now = plot_long_entry ? "LONG / " + long_entry_source_now : plot_short_entry ? "SHORT / " + short_entry_source_now : block_reason_now != "YOK" ? ((raw_long_signal or gated_long_signal or long_signal) ? "LONG / " + block_reason_now + " BLOK" : (raw_short_signal or gated_short_signal or short_signal) ? "SHORT / " + block_reason_now + " BLOK" : block_reason_now + " BLOK") : "YOK"
 bar_status_bg = plot_long_entry ? color.rgb(20, 115, 60) : plot_short_entry ? color.rgb(150, 35, 35) : block_bg(block_reason_now)
 parity_bar_source = raw_long_signal ? long_entry_source_now : raw_short_signal ? short_entry_source_now : "YOK"
 parity_bar_exit_is_backtest = backtest_window_ended and exit_happened and (in_long_before or in_short_before)
-parity_bar_exit_is_primary = reverse_close_long or reverse_close_short
-parity_bar_exit_is_mix = regime_close_long or regime_close_short
+parity_bar_exit_is_primary  = reverse_close_long or reverse_close_short
+parity_bar_exit_is_mix      = regime_close_long  or regime_close_short
 parity_bar_exit = parity_bar_exit_is_backtest ? "BACKTEST" : parity_bar_exit_is_primary ? primary_exit_source_label : parity_bar_exit_is_mix ? mismatch_exit_source_label + "/" + mix_exit_detail_now : "YOK"
 state_before_text = in_long_before ? "LONG" : in_short_before ? "SHORT" : "FLAT"
-state_after_text = fire_long_reversal or fire_long_flat ? "LONG" : fire_short_reversal or fire_short_flat ? "SHORT" : exit_happened ? "FLAT" : state_before_text
+state_after_text  = fire_long_reversal or fire_long_flat ? "LONG" : fire_short_reversal or fire_short_flat ? "SHORT" : exit_happened ? "FLAT" : state_before_text
 state_before_code = in_long_before ? "L" : in_short_before ? "S" : "F"
-state_after_code = state_after_text == "LONG" ? "L" : state_after_text == "SHORT" ? "S" : "F"
-state_change_now = state_after_text != state_before_text
+state_after_code  = state_after_text == "LONG" ? "L" : state_after_text == "SHORT" ? "S" : "F"
+state_change_now  = state_after_text != state_before_text
 state_event_reason = fire_long_reversal ? "REV/" + long_entry_source_now : fire_short_reversal ? "REV/" + short_entry_source_now : fire_long_flat ? "GIRIS/" + long_entry_source_now : fire_short_flat ? "GIRIS/" + short_entry_source_now : exit_happened ? "CIKIS/" + parity_bar_exit : "YOK"
 state_event_bg = state_after_text == "LONG" ? color.rgb(20, 115, 60) : state_after_text == "SHORT" ? color.rgb(150, 35, 35) : exit_happened ? (parity_bar_exit_is_backtest ? color.rgb(90, 90, 120) : parity_bar_exit_is_primary ? color.rgb(20, 140, 95) : parity_bar_exit_is_mix ? color.rgb(160, 110, 20) : color.rgb(70, 70, 70)) : color.rgb(70, 70, 70)
 parity_chain_now = "RL:" + audit_flag(raw_long_signal) + " RS:" + audit_flag(raw_short_signal) + " | GL:" + audit_flag(gated_long_signal) + " GS:" + audit_flag(gated_short_signal) + " | FL:" + audit_flag(long_signal) + " FS:" + audit_flag(short_signal)
@@ -692,19 +664,20 @@ parity_reason_bg = block_reason_now != "YOK" ? block_bg(block_reason_now) : pari
 parity_event_now = raw_long_signal or raw_short_signal or gated_long_signal or gated_short_signal or long_signal or short_signal or block_reason_now != "YOK" or parity_bar_exit != "YOK"
 if confirmed_bar and parity_event_now
     audit_last_event_bar := bar_index
-    audit_last_chain := parity_chain_now
-    audit_last_reason := parity_reason_now
-    audit_last_chain_bg := parity_chain_bg
+    audit_last_chain     := parity_chain_now
+    audit_last_reason    := parity_reason_now
+    audit_last_chain_bg  := parity_chain_bg
     audit_last_reason_bg := parity_reason_bg
 if confirmed_bar and state_change_now
-    audit_last_state_bar := bar_index
-    audit_last_state := state_before_text + ">" + state_after_text
+    audit_last_state_bar    := bar_index
+    audit_last_state        := state_before_text + ">" + state_after_text
     audit_last_state_reason := state_event_reason
-    audit_last_state_bg := state_event_bg
+    audit_last_state_bg     := state_event_bg
+
 state_audit_text = "AUTO-SYNC D:" + str.tostring(audit_state_desyncs) + " / " + (na(audit_last_state_bar) ? "YOK" : "#" + str.tostring(audit_last_state_bar) + " " + audit_last_state + " / " + audit_last_state_reason)
-state_audit_bg = state_desync ? color.rgb(20, 100, 120) : audit_last_state_bg
-parity_bar_text = na(audit_last_event_bar) ? "YOK" : "#" + str.tostring(audit_last_event_bar) + (audit_last_event_bar == bar_index and parity_event_now ? " / BU BAR" : " / SON")
-parity_bar_bg = na(audit_last_event_bar) ? color.rgb(70, 70, 70) : audit_last_reason_bg
+state_audit_bg   = state_desync ? color.rgb(20, 100, 120) : audit_last_state_bg
+parity_bar_text  = na(audit_last_event_bar) ? "YOK" : "#" + str.tostring(audit_last_event_bar) + (audit_last_event_bar == bar_index and parity_event_now ? " / BU BAR" : " / SON")
+parity_bar_bg    = na(audit_last_event_bar) ? color.rgb(70, 70, 70) : audit_last_reason_bg
 
 if fire_long_reversal
     strategy.entry("Long", strategy.long, qty=trade_contracts)
@@ -778,26 +751,26 @@ if fire_short_flat
 // DEBUG CONDITIONS
 //====================================================
 dbg_state_desync = state_desync
-long_filter_blocked  = raw_long_signal and long_regime_gate_ok and not all_long_filters_ok
+long_filter_blocked  = raw_long_signal  and long_regime_gate_ok  and not all_long_filters_ok
 short_filter_blocked = raw_short_signal and short_regime_gate_ok and not all_short_filters_ok
-
 if confirmed_bar
-    audit_regime_blocks += (dbg_regime_block_long ? 1 : 0) + (dbg_regime_block_short ? 1 : 0)
+    audit_regime_blocks        += (dbg_regime_block_long        ? 1 : 0) + (dbg_regime_block_short        ? 1 : 0)
     audit_regime_persist_blocks += (dbg_regime_persist_block_long ? 1 : 0) + (dbg_regime_persist_block_short ? 1 : 0)
-    audit_filter_blocks += (dbg_filter_block_long ? 1 : 0) + (dbg_filter_block_short ? 1 : 0)
-    audit_reentry_blocks += (dbg_reentry_block_long ? 1 : 0) + (dbg_reentry_block_short ? 1 : 0)
-    audit_reclaim_blocks += (dbg_reclaim_block_long ? 1 : 0) + (dbg_reclaim_block_short ? 1 : 0)
-    audit_cooldown_blocks += (dbg_cooldown_block_long ? 1 : 0) + (dbg_cooldown_block_short ? 1 : 0)
-    audit_state_blocks += (dbg_state_block_long ? 1 : 0) + (dbg_state_block_short ? 1 : 0)
-long_reentry_blocked  = gated_long_signal and not long_reentry_ok
+    audit_filter_blocks        += (dbg_filter_block_long         ? 1 : 0) + (dbg_filter_block_short         ? 1 : 0)
+    audit_reentry_blocks       += (dbg_reentry_block_long        ? 1 : 0) + (dbg_reentry_block_short        ? 1 : 0)
+    audit_reclaim_blocks       += (dbg_reclaim_block_long        ? 1 : 0) + (dbg_reclaim_block_short        ? 1 : 0)
+    audit_cooldown_blocks      += (dbg_cooldown_block_long       ? 1 : 0) + (dbg_cooldown_block_short       ? 1 : 0)
+    audit_state_blocks         += (dbg_state_block_long          ? 1 : 0) + (dbg_state_block_short          ? 1 : 0)
+
+long_reentry_blocked  = gated_long_signal  and not long_reentry_ok
 short_reentry_blocked = gated_short_signal and not short_reentry_ok
-long_reclaim_blocked  = confirmed_bar and engine_long_primary and not long_primary_reclaim_ok
+long_reclaim_blocked  = confirmed_bar and engine_long_primary  and not long_primary_reclaim_ok
 short_reclaim_blocked = confirmed_bar and engine_short_primary and not short_primary_reclaim_ok
-long_regime_blocked  = raw_long_signal and not long_regime_gate_ok
-short_regime_blocked = raw_short_signal and not short_regime_gate_ok
-long_exitlock_blocked  = gated_long_signal and flat_before and (just_closed_this_bar or not cooldown_ok)
+long_regime_blocked   = raw_long_signal  and not long_regime_gate_ok
+short_regime_blocked  = raw_short_signal and not short_regime_gate_ok
+long_exitlock_blocked  = gated_long_signal  and flat_before and (just_closed_this_bar or not cooldown_ok)
 short_exitlock_blocked = gated_short_signal and flat_before and (just_closed_this_bar or not cooldown_ok)
-long_position_blocked  = gated_long_signal and not flat_before and not allow_long_reversal
+long_position_blocked  = gated_long_signal  and not flat_before and not allow_long_reversal
 short_position_blocked = gated_short_signal and not flat_before and not allow_short_reversal
 
 //====================================================
@@ -806,34 +779,29 @@ short_position_blocked = gated_short_signal and not flat_before and not allow_sh
 show_regime_ema_final = show_regime_ema_plot and not (show_motor_plot and using_ema)
 show_supertrend_final = show_supertrend_plot
 show_mtf_ema_final    = show_mtf_ema_plot and mtf_filter_active
-show_motor_final   = show_motor_plot
-show_at_raw_final  = show_at_raw_plot and not (show_motor_plot and using_at)
-show_gc_raw_final  = show_gc_raw_plot and not (show_motor_plot and using_gc)
+show_motor_final      = show_motor_plot
+show_at_raw_final     = show_at_raw_plot and not (show_motor_plot and using_at)
+show_gc_raw_final     = show_gc_raw_plot and not (show_motor_plot and using_gc)
 
 //====================================================
 // VISUALS
 //====================================================
-plot(show_regime_ema_final ? regime_ema : na, "EMA200", color=color.gray, linewidth=2)
-plot(show_supertrend_final ? st_line : na, "SuperTrend", color=st_is_up ? color.lime : color.red, linewidth=2)
-plot(show_mtf_ema_final ? mtf_ema : na, "MTF EMA", color=color.fuchsia, linewidth=2)
-plot(show_motor_final ? engine_plot_line : na, "Unified Motor", color=color.black, linewidth=2)
-plot(show_at_raw_final ? at_line : na, "AT Raw", color=color.teal, linewidth=2)
-plot(show_gc_raw_final ? gc_mid : na, "GC Raw", color=color.blue, linewidth=2)
+plot(show_regime_ema_final ? regime_ema      : na, "EMA200",        color=color.gray,                         linewidth=2)
+plot(show_supertrend_final ? st_line         : na, "SuperTrend",    color=st_is_up ? color.lime : color.red,  linewidth=2)
+plot(show_mtf_ema_final    ? mtf_ema         : na, "MTF EMA",       color=color.fuchsia,                      linewidth=2)
+plot(show_motor_final      ? engine_plot_line : na, "Unified Motor", color=color.black,                       linewidth=2)
+plot(show_at_raw_final     ? at_line         : na, "AT Raw",        color=color.teal,                         linewidth=2)
+plot(show_gc_raw_final     ? gc_mid          : na, "GC Raw",        color=color.blue,                         linewidth=2)
 
-plotshape(show_shapes and plot_long_entry, title="Long Signal", style=shape.triangleup, location=location.belowbar, color=color.lime, size=size.small, text="L")
-plotshape(show_shapes and plot_short_entry, title="Short Signal", style=shape.triangledown, location=location.abovebar, color=color.red, size=size.small, text="S")
+plotshape(show_shapes and plot_long_entry,  title="Long Signal",  style=shape.triangleup,   location=location.belowbar, color=color.lime, size=size.small, text="L")
+plotshape(show_shapes and plot_short_entry, title="Short Signal", style=shape.triangledown, location=location.abovebar, color=color.red,  size=size.small, text="S")
 
-open_long_evt  = confirmed_bar and plot_long_entry
-open_short_evt = confirmed_bar and plot_short_entry
+open_long_evt   = confirmed_bar and plot_long_entry
+open_short_evt  = confirmed_bar and plot_short_entry
 close_long_evt  = confirmed_bar and (((backtest_window_ended and in_long_before) or long_exit_happened) and exit_happened)
 close_short_evt = confirmed_bar and (((backtest_window_ended and in_short_before) or short_exit_happened) and exit_happened)
 
-// Strategy bu revizyonda backtest/parity icindir.
-// Canli alarm ve webhook gonderimi indicator uzerinden 4 ayri TradingView alarmi ile yapilmalidir.
-
-// Precise debug path markers
-
-long_zone = show_filter_boxes and active_filter_count > 0 and regime_long_ok and all_long_filters_ok
+long_zone  = show_filter_boxes and active_filter_count > 0 and regime_long_ok  and all_long_filters_ok
 short_zone = show_filter_boxes and active_filter_count > 0 and regime_short_ok and all_short_filters_ok
 bgcolor(long_zone ? color.new(color.lime, 88) : short_zone ? color.new(color.red, 88) : na)
 
@@ -848,193 +816,119 @@ var bool dash_show_prev = false
 var table dash = na
 
 dash_needs_rebuild = na(dash) or dash_key != dash_key_prev or show_dashboard != dash_show_prev
-
 if dash_needs_rebuild
     if not na(dash)
         table.delete(dash)
     dash := show_dashboard ? table.new(dashboard_pos, 2, 50, border_width=1) : na
-    dash_key_prev := dash_key
+    dash_key_prev  := dash_key
     dash_show_prev := show_dashboard
-
 if show_dashboard and na(dash)
     dash := table.new(dashboard_pos, 2, 50, border_width=1)
-    dash_key_prev := dash_key
+    dash_key_prev  := dash_key
     dash_show_prev := show_dashboard
-
 if show_dashboard and not na(dash)
     table.clear(dash, 0, 0, 1, 49)
-    if show_dashboard
-        row = 0
-        hdr = color.rgb(18, 24, 32)
-        label_bg = color.rgb(46, 54, 66)
-
-        table.cell(dash, 0, row, "KALEM", text_color=color.white, bgcolor=hdr, text_size=dash_text_size)
-        table.cell(dash, 1, row, "DURUM", text_color=color.white, bgcolor=hdr, text_size=dash_text_size)
+if show_dashboard
+    row = 0
+    hdr      = color.rgb(18, 24, 32)
+    label_bg = color.rgb(46, 54, 66)
+    table.cell(dash, 0, row, "KALEM", text_color=color.white, bgcolor=hdr, text_size=dash_text_size)
+    table.cell(dash, 1, row, "DURUM", text_color=color.white, bgcolor=hdr, text_size=dash_text_size)
+    row += 1
+    table.cell(dash, 0, row, "REJIM", text_color=color.white, bgcolor=label_bg, text_size=dash_text_size)
+    table.cell(dash, 1, row, regime_state, text_color=color.white, bgcolor=status_bg(regime_long_ok, regime_short_ok), text_size=dash_text_size)
+    row += 1
+    table.cell(dash, 0, row, "HIBRIT KALICILIK", text_color=color.white, bgcolor=label_bg, text_size=dash_text_size)
+    table.cell(dash, 1, row, regime_persistence_text, text_color=color.white, bgcolor=regime_persistence_bg, text_size=dash_text_size)
+    row += 1
+    table.cell(dash, 0, row, "MOTOR", text_color=color.white, bgcolor=label_bg, text_size=dash_text_size)
+    table.cell(dash, 1, row, motor_state, text_color=color.white, bgcolor=motor_state_bg, text_size=dash_text_size)
+    row += 1
+    table.cell(dash, 0, row, "AT DURUM", text_color=color.white, bgcolor=label_bg, text_size=dash_text_size)
+    table.cell(dash, 1, row, at_motor_state, text_color=color.white, bgcolor=at_motor_bg, text_size=dash_text_size)
+    row += 1
+    table.cell(dash, 0, row, "GC DURUM", text_color=color.white, bgcolor=label_bg, text_size=dash_text_size)
+    table.cell(dash, 1, row, gc_motor_state, text_color=color.white, bgcolor=gc_motor_bg, text_size=dash_text_size)
+    row += 1
+    table.cell(dash, 0, row, "ST DURUM", text_color=color.white, bgcolor=label_bg, text_size=dash_text_size)
+    table.cell(dash, 1, row, st_motor_state, text_color=color.white, bgcolor=st_motor_bg, text_size=dash_text_size)
+    row += 1
+    table.cell(dash, 0, row, "EMA DURUM", text_color=color.white, bgcolor=label_bg, text_size=dash_text_size)
+    table.cell(dash, 1, row, ema_motor_state, text_color=color.white, bgcolor=ema_motor_bg, text_size=dash_text_size)
+    row += 1
+    table.cell(dash, 0, row, "AT-EMA DURUM", text_color=color.white, bgcolor=label_bg, text_size=dash_text_size)
+    table.cell(dash, 1, row, atema_motor_state, text_color=color.white, bgcolor=atema_motor_bg, text_size=dash_text_size)
+    row += 1
+    table.cell(dash, 0, row, "GC-EMA DURUM", text_color=color.white, bgcolor=label_bg, text_size=dash_text_size)
+    table.cell(dash, 1, row, gcema_motor_state, text_color=color.white, bgcolor=gcema_motor_bg, text_size=dash_text_size)
+    row += 1
+    table.cell(dash, 0, row, "ST-EMA DURUM", text_color=color.white, bgcolor=label_bg, text_size=dash_text_size)
+    table.cell(dash, 1, row, stema_motor_state, text_color=color.white, bgcolor=stema_motor_bg, text_size=dash_text_size)
+    row += 1
+    table.cell(dash, 0, row, "AKTIF FILTRE", text_color=color.white, bgcolor=label_bg, text_size=dash_text_size)
+    table.cell(dash, 1, row, str.tostring(active_filter_count), text_color=color.white, bgcolor=color.rgb(70, 70, 90), text_size=dash_text_size)
+    row += 1
+    if use_adx_filter
+        adx_state = adx_filter_ok ? "ONAY / " + str.tostring(adx_value, format.mintick) : "ZAYIF / " + str.tostring(adx_value, format.mintick)
+        adx_bg    = adx_filter_ok ? color.rgb(20, 115, 60) : color.rgb(160, 110, 20)
+        table.cell(dash, 0, row, "ADX FILTRE", text_color=color.white, bgcolor=label_bg, text_size=dash_text_size)
+        table.cell(dash, 1, row, adx_state, text_color=color.white, bgcolor=adx_bg, text_size=dash_text_size)
         row += 1
-
-        table.cell(dash, 0, row, "REJIM", text_color=color.white, bgcolor=label_bg, text_size=dash_text_size)
-        table.cell(dash, 1, row, regime_state, text_color=color.white, bgcolor=status_bg(regime_long_ok, regime_short_ok), text_size=dash_text_size)
+    table.cell(dash, 0, row, "KONFIG", text_color=color.white, bgcolor=label_bg, text_size=dash_text_size)
+    table.cell(dash, 1, row, config_state, text_color=color.white, bgcolor=config_safe ? color.rgb(20, 115, 60) : color.rgb(180, 90, 20), text_size=dash_text_size)
+    row += 1
+    table.cell(dash, 0, row, "POZISYON", text_color=color.white, bgcolor=label_bg, text_size=dash_text_size)
+    table.cell(dash, 1, row, position_state, text_color=color.white, bgcolor=in_long ? color.rgb(20,115,60) : in_short ? color.rgb(150,35,35) : color.rgb(70,70,70), text_size=dash_text_size)
+    row += 1
+    table.cell(dash, 0, row, "STATE AUDIT / AUTO-SYNC", text_color=color.white, bgcolor=label_bg, text_size=dash_text_size)
+    table.cell(dash, 1, row, state_audit_text, text_color=color.white, bgcolor=state_audit_bg, text_size=dash_text_size)
+    row += 1
+    if use_secondary_continuation
+        table.cell(dash, 0, row, "BEKLEYEN", text_color=color.white, bgcolor=label_bg, text_size=dash_text_size)
+        table.cell(dash, 1, row, pending_text(pending_long, pending_short, pending_long_bars, pending_short_bars), text_color=color.white, bgcolor=(pending_long or pending_short) ? color.rgb(50, 80, 140) : color.rgb(70, 70, 70), text_size=dash_text_size)
         row += 1
-
-        table.cell(dash, 0, row, "HIBRIT KALICILIK", text_color=color.white, bgcolor=label_bg, text_size=dash_text_size)
-        table.cell(dash, 1, row, regime_persistence_text, text_color=color.white, bgcolor=regime_persistence_bg, text_size=dash_text_size)
+        table.cell(dash, 0, row, "SETUP YASI", text_color=color.white, bgcolor=label_bg, text_size=dash_text_size)
+        table.cell(dash, 1, row, setup_age_text(pending_long, pending_short, long_setup_age, short_setup_age), text_color=color.white, bgcolor=(pending_long or pending_short) ? color.rgb(50, 80, 140) : color.rgb(70, 70, 70), text_size=dash_text_size)
         row += 1
-
-        table.cell(dash, 0, row, "MOTOR", text_color=color.white, bgcolor=label_bg, text_size=dash_text_size)
-        table.cell(dash, 1, row, motor_state, text_color=color.white, bgcolor=motor_state_bg, text_size=dash_text_size)
-        row += 1
-
-        table.cell(dash, 0, row, "AT DURUM", text_color=color.white, bgcolor=label_bg, text_size=dash_text_size)
-        table.cell(dash, 1, row, at_motor_state, text_color=color.white, bgcolor=at_motor_bg, text_size=dash_text_size)
-        row += 1
-
-        table.cell(dash, 0, row, "GC DURUM", text_color=color.white, bgcolor=label_bg, text_size=dash_text_size)
-        table.cell(dash, 1, row, gc_motor_state, text_color=color.white, bgcolor=gc_motor_bg, text_size=dash_text_size)
-        row += 1
-
-        table.cell(dash, 0, row, "ST DURUM", text_color=color.white, bgcolor=label_bg, text_size=dash_text_size)
-        table.cell(dash, 1, row, st_motor_state, text_color=color.white, bgcolor=st_motor_bg, text_size=dash_text_size)
-        row += 1
-
-        table.cell(dash, 0, row, "EMA DURUM", text_color=color.white, bgcolor=label_bg, text_size=dash_text_size)
-        table.cell(dash, 1, row, ema_motor_state, text_color=color.white, bgcolor=ema_motor_bg, text_size=dash_text_size)
-        row += 1
-
-        table.cell(dash, 0, row, "AT-EMA DURUM", text_color=color.white, bgcolor=label_bg, text_size=dash_text_size)
-        table.cell(dash, 1, row, atema_motor_state, text_color=color.white, bgcolor=atema_motor_bg, text_size=dash_text_size)
-        row += 1
-
-        table.cell(dash, 0, row, "GC-EMA DURUM", text_color=color.white, bgcolor=label_bg, text_size=dash_text_size)
-        table.cell(dash, 1, row, gcema_motor_state, text_color=color.white, bgcolor=gcema_motor_bg, text_size=dash_text_size)
-        row += 1
-
-        table.cell(dash, 0, row, "ST-EMA DURUM", text_color=color.white, bgcolor=label_bg, text_size=dash_text_size)
-        table.cell(dash, 1, row, stema_motor_state, text_color=color.white, bgcolor=stema_motor_bg, text_size=dash_text_size)
-        row += 1
-
-        table.cell(dash, 0, row, "AKTIF FILTRE", text_color=color.white, bgcolor=label_bg, text_size=dash_text_size)
-        table.cell(dash, 1, row, str.tostring(active_filter_count), text_color=color.white, bgcolor=color.rgb(70, 70, 90), text_size=dash_text_size)
-        row += 1
-
-        if use_adx_filter
-            adx_state = adx_filter_ok ? "ONAY / " + str.tostring(adx_value, format.mintick) : "ZAYIF / " + str.tostring(adx_value, format.mintick)
-            adx_bg = adx_filter_ok ? color.rgb(20, 115, 60) : color.rgb(160, 110, 20)
-            table.cell(dash, 0, row, "ADX FILTRE", text_color=color.white, bgcolor=label_bg, text_size=dash_text_size)
-            table.cell(dash, 1, row, adx_state, text_color=color.white, bgcolor=adx_bg, text_size=dash_text_size)
-            row += 1
-
-        table.cell(dash, 0, row, "KONFIG", text_color=color.white, bgcolor=label_bg, text_size=dash_text_size)
-        table.cell(dash, 1, row, config_state, text_color=color.white, bgcolor=config_safe ? color.rgb(20, 115, 60) : color.rgb(180, 90, 20), text_size=dash_text_size)
-        row += 1
-
-        table.cell(dash, 0, row, "POZISYON", text_color=color.white, bgcolor=label_bg, text_size=dash_text_size)
-        table.cell(dash, 1, row, position_state, text_color=color.white, bgcolor=in_long ? color.rgb(20,115,60) : in_short ? color.rgb(150,35,35) : color.rgb(70,70,70), text_size=dash_text_size)
-        row += 1
-
-        table.cell(dash, 0, row, "STATE AUDIT / AUTO-SYNC", text_color=color.white, bgcolor=label_bg, text_size=dash_text_size)
-        table.cell(dash, 1, row, state_audit_text, text_color=color.white, bgcolor=state_audit_bg, text_size=dash_text_size)
-        row += 1
-
-        if use_secondary_continuation
-            table.cell(dash, 0, row, "BEKLEYEN", text_color=color.white, bgcolor=label_bg, text_size=dash_text_size)
-            table.cell(dash, 1, row, pending_text(pending_long, pending_short, pending_long_bars, pending_short_bars), text_color=color.white, bgcolor=(pending_long or pending_short) ? color.rgb(50, 80, 140) : color.rgb(70, 70, 70), text_size=dash_text_size)
-            row += 1
-
-            table.cell(dash, 0, row, "SETUP YASI", text_color=color.white, bgcolor=label_bg, text_size=dash_text_size)
-            table.cell(dash, 1, row, setup_age_text(pending_long, pending_short, long_setup_age, short_setup_age), text_color=color.white, bgcolor=(pending_long or pending_short) ? color.rgb(50, 80, 140) : color.rgb(70, 70, 70), text_size=dash_text_size)
-            row += 1
-
-        table.cell(dash, 0, row, "RE-ENTRY LOCK", text_color=color.white, bgcolor=label_bg, text_size=dash_text_size)
-        table.cell(dash, 1, row, reentry_state, text_color=color.white, bgcolor=(long_reentry_lock or short_reentry_lock) ? color.rgb(160, 110, 20) : color.rgb(70, 70, 70), text_size=dash_text_size)
-        row += 1
-
-        table.cell(dash, 0, row, "COOLDOWN", text_color=color.white, bgcolor=label_bg, text_size=dash_text_size)
-        table.cell(dash, 1, row, cooldown_ok ? "YOK" : str.tostring(cooldown_left), text_color=color.white, bgcolor=cooldown_ok ? color.rgb(70, 70, 70) : color.rgb(150, 35, 35), text_size=dash_text_size)
-        row += 1
-
-        table.cell(dash, 0, row, "SON BLOK", text_color=color.white, bgcolor=label_bg, text_size=dash_text_size)
-        table.cell(dash, 1, row, last_block_reason, text_color=color.white, bgcolor=block_bg(last_block_reason), text_size=dash_text_size)
-        row += 1
-
-        table.cell(dash, 0, row, "BU BAR DURUMU", text_color=color.white, bgcolor=label_bg, text_size=dash_text_size)
-        table.cell(dash, 1, row, bar_status_now, text_color=color.white, bgcolor=bar_status_bg, text_size=dash_text_size)
-        row += 1
-
-        table.cell(dash, 0, row, "PARITY BAR", text_color=color.white, bgcolor=label_bg, text_size=dash_text_size)
-        table.cell(dash, 1, row, parity_bar_text, text_color=color.white, bgcolor=parity_bar_bg, text_size=dash_text_size)
-        row += 1
-
-        table.cell(dash, 0, row, "PARITY ZINCIR", text_color=color.white, bgcolor=label_bg, text_size=dash_text_size)
-        table.cell(dash, 1, row, audit_last_chain, text_color=color.white, bgcolor=audit_last_chain_bg, text_size=dash_text_size)
-        row += 1
-
-        table.cell(dash, 0, row, "PARITY NEDEN", text_color=color.white, bgcolor=label_bg, text_size=dash_text_size)
-        table.cell(dash, 1, row, audit_last_reason, text_color=color.white, bgcolor=audit_last_reason_bg, text_size=dash_text_size)
-        row += 1
-
-        mix_count_text = "ER:" + str.tostring(audit_mix_ema_ok_regime_fail) + " RE:" + str.tostring(audit_mix_regime_ok_ema_fail) + " OP:" + str.tostring(audit_mix_opp_persist_wait) + " FF:" + str.tostring(audit_mix_ema_regime_fail)
-        table.cell(dash, 0, row, "MIX SAYAC", text_color=color.white, bgcolor=label_bg, text_size=dash_text_size)
-        table.cell(dash, 1, row, mix_count_text, text_color=color.white, bgcolor=(audit_mix_ema_ok_regime_fail + audit_mix_regime_ok_ema_fail + audit_mix_opp_persist_wait + audit_mix_ema_regime_fail) > 0 ? color.rgb(160, 110, 20) : color.rgb(70, 70, 70), text_size=dash_text_size)
-        row += 1
-
-        table.cell(dash, 0, row, "SON MIX", text_color=color.white, bgcolor=label_bg, text_size=dash_text_size)
-        table.cell(dash, 1, row, last_mix_detail, text_color=color.white, bgcolor=mix_detail_bg(last_mix_detail), text_size=dash_text_size)
-        row += 1
-
-        table.cell(dash, 0, row, "SON CIKIS", text_color=color.white, bgcolor=label_bg, text_size=dash_text_size)
-        table.cell(dash, 1, row, last_exit_reason, text_color=color.white, bgcolor=last_exit_bg, text_size=dash_text_size)
-        row += 1
-
-        entry_bg = last_entry_source == primary_entry_source_label ? color.rgb(20, 140, 95) : last_entry_source == "GERI_KAZANIM" ? color.rgb(60, 90, 160) : last_entry_source == "REJIM_DEVAM" ? color.rgb(20, 100, 120) : last_entry_source == "IKINCIL_DEVAM" ? color.rgb(50, 80, 140) : color.rgb(70, 70, 70)
-        table.cell(dash, 0, row, "GIRIS KAYNAGI", text_color=color.white, bgcolor=label_bg, text_size=dash_text_size)
-        table.cell(dash, 1, row, last_entry_source, text_color=color.white, bgcolor=entry_bg, text_size=dash_text_size)
-        row += 1
-
-        long_gate_text = long_tp_wait_reset ? "RESET BEKLE" : long_reentry_lock and not na(long_reentry_level) ? "ACIK > " + str.tostring(long_reentry_level, format.mintick) : long_flip_reclaim_armed and not na(last_long_exit_price) ? engine_label + " > " + str.tostring(last_long_exit_price, format.mintick) : "KAPALI"
-        short_gate_text = short_tp_wait_reset ? "RESET BEKLE" : short_reentry_lock and not na(short_reentry_level) ? "ACIK < " + str.tostring(short_reentry_level, format.mintick) : short_flip_reclaim_armed and not na(last_short_exit_price) ? engine_label + " < " + str.tostring(last_short_exit_price, format.mintick) : "KAPALI"
-        table.cell(dash, 0, row, "LONG YENI GIRIS", text_color=color.white, bgcolor=label_bg, text_size=dash_text_size)
-        table.cell(dash, 1, row, long_gate_text, text_color=color.white, bgcolor=(long_reentry_lock or long_flip_reclaim_armed) ? color.rgb(40, 80, 140) : color.rgb(70, 70, 70), text_size=dash_text_size)
-        row += 1
-
-        table.cell(dash, 0, row, "SHORT YENI GIRIS", text_color=color.white, bgcolor=label_bg, text_size=dash_text_size)
-        table.cell(dash, 1, row, short_gate_text, text_color=color.white, bgcolor=(short_reentry_lock or short_flip_reclaim_armed) ? color.rgb(40, 80, 140) : color.rgb(70, 70, 70), text_size=dash_text_size)
-        row += 1
-
-        table.cell(dash, 0, row, "KACAN REJIM", text_color=color.white, bgcolor=label_bg, text_size=dash_text_size)
-        table.cell(dash, 1, row, str.tostring(audit_regime_blocks), text_color=color.white, bgcolor=color.rgb(160, 110, 20), text_size=dash_text_size)
-        row += 1
-
-        table.cell(dash, 0, row, "KACAN KALICILIK", text_color=color.white, bgcolor=label_bg, text_size=dash_text_size)
-        table.cell(dash, 1, row, str.tostring(audit_regime_persist_blocks), text_color=color.white, bgcolor=color.rgb(180, 120, 30), text_size=dash_text_size)
-        row += 1
-
-        table.cell(dash, 0, row, "KACAN FILTRE", text_color=color.white, bgcolor=label_bg, text_size=dash_text_size)
-        table.cell(dash, 1, row, str.tostring(audit_filter_blocks), text_color=color.white, bgcolor=color.rgb(120, 70, 20), text_size=dash_text_size)
-        row += 1
-
-        table.cell(dash, 0, row, "KACAN RE-ENTRY", text_color=color.white, bgcolor=label_bg, text_size=dash_text_size)
-        table.cell(dash, 1, row, str.tostring(audit_reentry_blocks), text_color=color.white, bgcolor=color.rgb(40, 80, 140), text_size=dash_text_size)
-        row += 1
-
-        table.cell(dash, 0, row, "KACAN RECLAIM", text_color=color.white, bgcolor=label_bg, text_size=dash_text_size)
-        table.cell(dash, 1, row, str.tostring(audit_reclaim_blocks), text_color=color.white, bgcolor=color.rgb(60, 90, 160), text_size=dash_text_size)
-        row += 1
-
-        table.cell(dash, 0, row, "KACAN BEKLEME", text_color=color.white, bgcolor=label_bg, text_size=dash_text_size)
-        table.cell(dash, 1, row, str.tostring(audit_cooldown_blocks), text_color=color.white, bgcolor=color.rgb(80, 80, 120), text_size=dash_text_size)
-        row += 1
-
-        table.cell(dash, 0, row, "KACAN DURUM", text_color=color.white, bgcolor=label_bg, text_size=dash_text_size)
-        table.cell(dash, 1, row, str.tostring(audit_state_blocks), text_color=color.white, bgcolor=color.rgb(70, 70, 70), text_size=dash_text_size)
-        row += 1
-
-        if use_mtf_filter
-            mtf_dash_text = mtf_filter_active ? status3(mtf_long_ok, mtf_short_ok) : "PASIF TF"
-            mtf_dash_bg = mtf_filter_active ? status_bg(mtf_long_ok, mtf_short_ok) : color.rgb(70, 70, 70)
-            table.cell(dash, 0, row, "MTF EMA HTF", text_color=color.white, bgcolor=label_bg, text_size=dash_text_size)
-            table.cell(dash, 1, row, mtf_dash_text, text_color=color.white, bgcolor=mtf_dash_bg, text_size=dash_text_size)
-            row += 1
-        if show_gchannel_dashboard_row
-            table.cell(dash, 0, row, "G-CHANNEL", text_color=color.white, bgcolor=label_bg, text_size=dash_text_size)
-            table.cell(dash, 1, row, status3(gchannel_filter_long_ok, gchannel_filter_short_ok), text_color=color.white, bgcolor=status_bg(gchannel_filter_long_ok, gchannel_filter_short_ok), text_size=dash_text_size)
-            row += 1
+    table.cell(dash, 0, row, "RE-ENTRY LOCK", text_color=color.white, bgcolor=label_bg, text_size=dash_text_size)
+    table.cell(dash, 1, row, reentry_state, text_color=color.white, bgcolor=(long_reentry_lock or short_reentry_lock) ? color.rgb(160, 110, 20) : color.rgb(70, 70, 70), text_size=dash_text_size)
+    row += 1
+    table.cell(dash, 0, row, "COOLDOWN", text_color=color.white, bgcolor=label_bg, text_size=dash_text_size)
+    table.cell(dash, 1, row, cooldown_ok ? "YOK" : str.tostring(cooldown_left), text_color=color.white, bgcolor=cooldown_ok ? color.rgb(70, 70, 70) : color.rgb(150, 35, 35), text_size=dash_text_size)
+    row += 1
+    table.cell(dash, 0, row, "SON BLOK", text_color=color.white, bgcolor=label_bg, text_size=dash_text_size)
+    table.cell(dash, 1, row, last_block_reason, text_color=color.white, bgcolor=block_bg(last_block_reason), text_size=dash_text_size)
+    row += 1
+    table.cell(dash, 0, row, "BU BAR DURUMU", text_color=color.white, bgcolor=label_bg, text_size=dash_text_size)
+    table.cell(dash, 1, row, bar_status_now, text_color=color.white, bgcolor=bar_status_bg, text_size=dash_text_size)
+    row += 1
+    table.cell(dash, 0, row, "PARITY BAR", text_color=color.white, bgcolor=label_bg, text_size=dash_text_size)
+    table.cell(dash, 1, row, parity_bar_text, text_color=color.white, bgcolor=parity_bar_bg, text_size=dash_text_size)
+    row += 1
+    table.cell(dash, 0, row, "PARITY ZINCIR", text_color=color.white, bgcolor=label_bg, text_size=dash_text_size)
+    table.cell(dash, 1, row, audit_last_chain, text_color=color.white, bgcolor=audit_last_chain_bg, text_size=dash_text_size)
+    row += 1
+    table.cell(dash, 0, row, "PARITY NEDEN", text_color=color.white, bgcolor=label_bg, text_size=dash_text_size)
+    table.cell(dash, 1, row, audit_last_reason, text_color=color.white, bgcolor=audit_last_reason_bg, text_size=dash_text_size)
+    row += 1
+    mix_count_text = "ER:" + str.tostring(audit_mix_ema_ok_regime_fail) + " RE:" + str.tostring(audit_mix_regime_ok_ema_fail) + " OP:" + str.tostring(audit_mix_opp_persist_wait) + " FF:" + str.tostring(audit_mix_ema_regime_fail)
+    table.cell(dash, 0, row, "MIX SAYAC", text_color=color.white, bgcolor=label_bg, text_size=dash_text_size)
+    table.cell(dash, 1, row, mix_count_text, text_color=color.white, bgcolor=(audit_mix_ema_ok_regime_fail + audit_mix_regime_ok_ema_fail + audit_mix_opp_persist_wait + audit_mix_ema_regime_fail) > 0 ? color.rgb(160, 110, 20) : color.rgb(70, 70, 70), text_size=dash_text_size)
+    row += 1
+    table.cell(dash, 0, row, "SON MIX", text_color=color.white, bgcolor=label_bg, text_size=dash_text_size)
+    table.cell(dash, 1, row, last_mix_detail, text_color=color.white, bgcolor=mix_detail_bg(last_mix_detail), text_size=dash_text_size)
+    row += 1
+    table.cell(dash, 0, row, "SON CIKIS", text_color=color.white, bgcolor=label_bg, text_size=dash_text_size)
+    table.cell(dash, 1, row, last_exit_reason, text_color=color.white, bgcolor=last_exit_bg, text_size=dash_text_size)
+    row += 1
+    entry_bg = last_entry_source == primary_entry_source_label ? color.rgb(20, 140, 95) : last_entry_source == "GERI_KAZANIM" ? color.rgb(60, 90, 160) : last_entry_source == "REJIM_DEVAM" ? color.rgb(20, 100, 120) : last_entry_source == "IKINCIL_DEVAM" ? color.rgb(50, 80, 140) : color.rgb(70, 70, 70)
+    table.cell(dash, 0, row, "GIRIS KAYNAGI", text_color=color.white, bgcolor=label_bg, text_size=dash_text_size)
+    table.cell(dash, 1, row, last_entry_source, text_color=color.white, bgcolor=entry_bg, text_size=dash_text_size)
+    row += 1
+    long_gate_text  = long_tp_wait_reset  ? "RESET BEKLE" : long_reentry_lock  and not na(long_reentry_level)  ? "ACIK > " + str.tostring(long_reentry_level,  format.mintick) : long_flip_reclaim_armed  and not na(last_long_exit_price)  ? engine_label + " > " + str.tostring(last_long_exit_price,  format.mintick) : "KAPALI"
+    short_gate_text = short_tp_wait_reset ? "RESET BEKLE" : short_reentry_lock and not na(short_reentry_level) ? "ACIK < " + str.tostring(short_reentry_level, format.mintick) : short_flip_reclaim_armed and not na(last_short_exit_price) ? engine_label + " < " + str.tostring(last_short_exit_price, format.mintick) : "KAPALI"
+    table.cell(dash, 0, row, "LONG YENI GIRIS", text_color=color.white, bgcolor=label_bg, text_size=dash_text_size)
+    table.cell(dash, 1, row, long_gate_text, text_color=color.white, bgcolor=(long_reentry_lock or long_flip_reclaim_armed) ? color.rgb(40, 80, 140) : color.rgb(70, 70, 70), text_size=dash_text_size)
+    row += 1
+    table.cell(dash, 0, row, "SHORT YENI GIRIS", text_color=color.white, bgcolor=label_bg, text_size=dash_text_size)
+    table.cell(dash, 1, row, short_gate_text, text_color=color.white, bgcolor=(short_reentry_lock or short_flip_reclaim_armed) ? color.rgb(40, 80, 140) : color.rgb(70, 70, 70), text_size=dash_text_size)
