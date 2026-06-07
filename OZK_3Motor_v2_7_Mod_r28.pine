@@ -1,0 +1,935 @@
+//@version=6
+strategy("OZK Lean Modular System v2.7 r28 (Modular)", shorttitle="OZK v2.7 MOD r28", overlay=true,
+     initial_capital=100000, currency=currency.TRY,
+     default_qty_type=strategy.fixed, default_qty_value=1, pyramiding=0,
+     process_orders_on_close=true,
+     commission_type=strategy.commission.percent, commission_value=0.01)
+
+// =============================================
+// r28 DEGISIKLIKLERI (r27 -> r28):
+// DASHBOARD SADELESTIRME (21 dolu satir -> 16) + K6 mod uyarisi + yorum temizligi
+//
+// TABLO: table.new 25 -> 16 (gercek dolu satir 21 idi; 4 bos tampon + 5 icerik
+//        cikti). Cikan 5 satir (operasyonel onem dusuk):
+//   1) DURUM/INFO ara-basligi — dekoratif ayrac, sifir veri
+//   2) BLOK — audit sayaclari (R/P/F debug); sayaclar iceride birikmeye devam eder
+//   3) SON GIRIS — grafikteki L/S sekilleriyle mukerrer
+//   4) RECLAIM — nis (yalniz hibrit motor_stop reclaim arm edince anlamli)
+//   5) KALICILIK — varsayilan kapali iken sadece "KAPALI" = olu agirlik
+//        (ONCELIK 2'de persistence test edilirse geri eklenir; hold_bars sayaci durur)
+//   KORUNAN: SON CIKIS (STOP/REV/BASIT — K4/K5'i canli'da dogrulamaya yarar).
+//
+// K6 [GORUNURLUK] — pozisyon-ortasi mod uyumsuzlugu gorunur kilindi:
+//   K5 reverse'u mantiken korudu ama kullanici pozisyon acikken active_mode'u
+//   degistirdiyse panelde belli olmuyordu. Cozum (satir EKLEMEDEN, KILITLI hucresi):
+//     kilit_mode_mismatch = in_position and (simple_active != state.locked_simple)
+//     -> KILITLI satiri kirmizi + "⚠MOD!"
+//   (is_live_mode benzeri genel uyari yerine hedefli; Pine modu engelleyemez, uyarir.)
+//
+// YORUM TEMIZLIGI: r27'de block_bg() fonksiyonu silinmisti ama satir 364'teki bayat
+//   yorum hala onu listeliyordu — guncellendi.
+//
+// Layout (16 satir): Header, MOD, MOTOR1(K2), MOTOR2, REJIM, AT, GC, ST, EMA,
+//   FILTRE(K3), MTF, RSI, ADX, POZISYON, KILITLI(K6), SON CIKIS.
+// =============================================
+
+//============================================
+// SECTION 1: CONSTANTS & INPUTS
+//============================================
+
+DIR_BOTH       = "Both"
+DIR_LONG_ONLY  = "Long Only"
+DIR_SHORT_ONLY = "Short Only"
+
+MOTOR_AT_EMA  = "AT EMA"
+MOTOR_GC_EMA  = "GC EMA"
+MOTOR_ST_EMA  = "ST EMA"
+MOTOR_EMA_EMA = "EMA EMA"
+
+// r24: Calisma modu (mutually exclusive)
+MODE_M1 = "Motor 1 (Hibrit)"
+MODE_M2 = "Motor 2 (Basit)"
+
+regime_group   = "1. Hibrit Rejim"
+engine_group   = "2. Motor Secimi"
+filter_group   = "3. Filters"
+display_group  = "4. Display"
+switch_group   = "5. Switch Board"
+order_group    = "6. Order"
+
+trade_contracts = input.int(1, "Order Contracts", minval=1, group=order_group)
+cooldown_bars   = input.int(0, "Cooldown Bars (cikistan sonra)", minval=0, group=order_group)
+
+use_regime_persistence  = input.bool(false, "Hibrit Kalicilik Sarti", group=regime_group)
+regime_persistence_bars = input.int(2, "Hibrit Kalicilik Bar Sayisi", minval=1, group=regime_group)
+
+// r24: Calisma modu — sadece biri aktif
+active_mode = input.string(MODE_M1, "═══ AKTIF MOTOR ═══",
+     options=[MODE_M1, MODE_M2], group=engine_group,
+     tooltip="MOTOR 1: Hibrit rejim (Motor + EMA200 + Price uclu kosul)\nMOTOR 2: Basit crossover (sadece line crossover, EMA200 filtresi YOK)")
+
+motor1_choice = input.string(MOTOR_AT_EMA, "Motor 1 Gosterge (Hibrit)",
+     options=[MOTOR_AT_EMA, MOTOR_GC_EMA, MOTOR_ST_EMA, MOTOR_EMA_EMA], group=engine_group,
+     tooltip="Motor 1 secildiginde kullanilacak gosterge (hibrit rejim)")
+
+motor2_choice = input.string(MOTOR_AT_EMA, "Motor 2 Gosterge (Basit)",
+     options=[MOTOR_AT_EMA, MOTOR_GC_EMA, MOTOR_ST_EMA, MOTOR_EMA_EMA], group=engine_group,
+     tooltip="Motor 2 secildiginde kullanilacak gosterge (basit crossover)")
+
+trade_direction     = input.string(DIR_BOTH, "Trade Direction",
+     options=[DIR_BOTH, DIR_LONG_ONLY, DIR_SHORT_ONLY], group=engine_group)
+allow_long_entries  = trade_direction != DIR_SHORT_ONLY
+allow_short_entries = trade_direction != DIR_LONG_ONLY
+
+at_len     = input.int(14,  "AT Periyot",    minval=1,    group=engine_group)
+at_mult    = input.float(3.0, "AT Katsayi",  step=0.1, minval=0.1, group=engine_group)
+gc_len     = input.int(200, "GC Periyot",    minval=2,    group=engine_group)
+st_factor  = input.float(3.0, "ST Factor",   step=0.1, minval=0.1, group=engine_group)
+st_atr_len = input.int(10,  "ST ATR Length", minval=1,    group=engine_group)
+// r23: EMA Motor periyodu — optimal degeri bulup ema_len icin kullanabilirsiniz
+ema_motor_len = input.int(50, "EMA Motor Periyot", minval=2, group=engine_group,
+     tooltip="EMA Motor icin periyot. Farkli degerler test edip max kar veren EMA'yi bulun.\nSonra bu degeri 'EMA200 Length' icin de kullanabilirsiniz.")
+
+use_mtf_filter = input.bool(false, "MTF EMA Filter",  group=filter_group)
+mtf_tf         = input.timeframe("240", "MTF TF",      group=filter_group)
+mtf_ema_len    = input.int(200, "MTF EMA Length",      minval=1, group=filter_group)
+ema_len        = input.int(200, "EMA200 Length",       minval=1, group=filter_group)
+
+use_rsi_filter   = input.bool(false, "RSI Filter",    group=filter_group)
+rsi_confirm_bars = input.int(1, "RSI Confirm Bars",   minval=1, maxval=5, group=filter_group)
+
+use_adx_filter = input.bool(false, "ADX Filter",      group=filter_group)
+adx_len        = input.int(14, "ADX Length",          minval=1, group=filter_group)
+adx_min        = input.float(20.0, "ADX Min",         minval=1.0, step=0.5, group=filter_group)
+
+
+show_dashboard     = input.bool(false, "Show Dashboard",   group=display_group)
+dashboard_y_raw    = input.string("top",    "Position Y",  group=display_group)
+dashboard_x_raw    = input.string("right",  "Position X",  group=display_group)
+dashboard_size_raw = input.string("Normal", "Size",        group=display_group)
+show_shapes        = input.bool(true, "Show Signal Shapes",group=display_group)
+
+show_regime_ema_plot = input.bool(true, "EMA200", group=switch_group)
+show_motor_plot      = input.bool(true, "Motor",  group=switch_group)
+
+dashboard_y    = dashboard_y_raw == "middle" ? "middle" : dashboard_y_raw == "bottom" ? "bottom" : "top"
+dashboard_x    = dashboard_x_raw == "left"   ? "left"   : dashboard_x_raw == "center" ? "center" : "right"
+dashboard_size = dashboard_size_raw
+
+//============================================
+// SECTION 2: TYPE DEFINITIONS
+//============================================
+
+// Motor type — her motor için hesaplamalar ve durumlar
+type Motor
+    string name
+    float  line_value
+    bool   long_entry_ok
+    bool   short_entry_ok
+    bool   long_hold_ok
+    bool   short_hold_ok
+
+// FIX: rsi bar sayaçları type içine taşındı (method içinde var yasak)
+type FilterEngine
+    bool mtf_active
+    bool mtf_long_ok
+    bool mtf_short_ok
+    bool rsi_long_ok
+    bool rsi_short_ok
+    bool adx_ok
+    int  active_count
+    bool config_safe
+    int  rsi_above_bars   // FIX: method içi var yerine buraya
+    int  rsi_below_bars   // FIX: method içi var yerine buraya
+
+// Trade state machine
+type TradeState
+    int    current            // 0=FLAT, 1=LONG, -1=SHORT
+    string locked_motor       // "AT EMA" / "GC EMA" / "ST EMA" / "EMA EMA" / ""
+    bool   long_reentry_lock
+    bool   short_reentry_lock
+    float  long_reentry_level
+    float  short_reentry_level
+    bool   long_reclaim_armed
+    bool   short_reclaim_armed
+    float  last_long_exit_price
+    float  last_short_exit_price
+    string last_exit_reason
+    string last_entry_source
+    int    last_exit_bar
+    // r22: Basit mod cikis seviyeleri (3 motor ortak)
+    float  simple_long_exit_price
+    float  simple_short_exit_price
+    // r25: Giris anindaki mod kilidi (true=Basit/M2, false=Hibrit/M1)
+    bool   locked_simple
+
+// Audit counters
+type AuditCounters
+    int regime_blocks
+    int persist_blocks
+    int filter_blocks
+    int reentry_blocks
+    int reclaim_blocks
+    int cooldown_blocks
+    int state_blocks
+    int mix_ema_ok_motor_fail
+    int mix_motor_ok_ema_fail
+    int mix_both_fail
+    int state_desyncs
+
+
+//============================================
+// SECTION 2.5: YARDIMCI FONKSİYONLAR
+// NEDEN BURADA: get_dashboard_bg (SECTION 3) status_bg'yi çağırıyor.
+// Pine v6'da forward reference yasak — tanım çağrıdan önce gelmeli.
+//============================================
+
+dash_text_size_str(string sel) =>
+    (sel == "Tiny"  ? size.tiny  :
+     sel == "Small" ? size.small :
+     sel == "Large" ? size.large : size.normal)
+
+status_bg(bool long_ok, bool short_ok) =>
+    (long_ok  ? color.rgb(20, 140, 95) :
+     short_ok ? color.rgb(150, 35, 35) : color.rgb(70, 70, 70))
+
+// r27: block_bg() KALDIRILDI — hicbir yerde cagrilmiyordu (r19'da block_reason_now
+// inline renge gecince islevsiz kalmisti).
+
+//============================================
+// SECTION 3: MOTOR METHODS
+//============================================
+
+// Standalone indicator calculators (method olamaz — series döndürüyorlar)
+calc_alphatrend(int len, float mult) =>
+    atr         = ta.sma(ta.tr, len)
+    up_trend    = low  - atr * mult
+    down_trend  = high + atr * mult
+    momentum_up = ta.rsi(close, len) >= 50
+    var float line = 0.0
+    // FIX r09: warmup duzeltmesi — 0.0 yerine close, ilk barlarda line=0 problemi cozuldu
+    prev_line = nz(line[1], close)
+    line := momentum_up ?
+         (up_trend  < prev_line ? prev_line : up_trend)  :
+         (down_trend > prev_line ? prev_line : down_trend)
+    line
+
+calc_gchannel(int len) =>
+    var float a = na
+    var float b = na
+    prev_a = nz(a[1], close)
+    prev_b = nz(b[1], close)
+    a := math.max(close, prev_a) - ((prev_a - prev_b) / len)
+    b := math.min(close, prev_b) + ((prev_a - prev_b) / len)
+    (a + b) * 0.5
+
+// Motor entry/hold koşullarını hesapla
+// FIX: kullanılmayan regime_threshold parametresi kaldırıldı
+method calculate(Motor m, float price, float ema200) =>
+    m.long_entry_ok  := price > m.line_value and price > ema200 and m.line_value > ema200
+    m.short_entry_ok := price < m.line_value and price < ema200 and m.line_value < ema200
+    m.long_hold_ok   := price > ema200
+    m.short_hold_ok  := price < ema200
+    m
+
+// FIX: Tuple return yasak → iki ayrı method
+method get_dashboard_text(Motor m, int ts_current, bool is_active) =>
+    long_ok  = m.long_entry_ok  or (ts_current == 1  and m.long_hold_ok  and not m.short_entry_ok)
+    short_ok = m.short_entry_ok or (ts_current == -1 and m.short_hold_ok and not m.long_entry_ok)
+    status   = long_ok ? "LONG" : short_ok ? "SHORT" : "MIX"
+    (is_active ? "AKTIF / " : "") + m.name + " / " + status
+
+method get_dashboard_bg(Motor m, int ts_current, bool is_active) =>
+    long_ok  = m.long_entry_ok  or (ts_current == 1  and m.long_hold_ok  and not m.short_entry_ok)
+    short_ok = m.short_entry_ok or (ts_current == -1 and m.short_hold_ok and not m.long_entry_ok)
+    long_ok ? color.rgb(20, 140, 95) : short_ok ? color.rgb(150, 35, 35) : color.rgb(70, 70, 70)
+
+
+//============================================
+// SECTION 4: FILTER METHODS
+//============================================
+
+method update_filters(FilterEngine f, float price, float ema200) =>
+    // MTF
+    mtf_ema    = use_mtf_filter ? request.security(syminfo.tickerid, mtf_tf, ta.ema(close, mtf_ema_len), lookahead=barmerge.lookahead_off) : na
+    f.mtf_active    := use_mtf_filter
+    f.mtf_long_ok   := not use_mtf_filter or price > mtf_ema
+    f.mtf_short_ok  := not use_mtf_filter or price < mtf_ema
+
+    // RSI
+    rsi_val   = ta.rsi(price, 14)
+    above_50  = rsi_val >= 50
+    below_50  = rsi_val < 50
+    f.rsi_above_bars := above_50 ? f.rsi_above_bars + 1 : 0
+    f.rsi_below_bars := below_50 ? f.rsi_below_bars + 1 : 0
+    f.rsi_long_ok    := not use_rsi_filter or f.rsi_above_bars >= rsi_confirm_bars
+    f.rsi_short_ok   := not use_rsi_filter or f.rsi_below_bars >= rsi_confirm_bars
+
+    // ADX
+    [plus_di, minus_di, adx_val] = ta.dmi(adx_len, adx_len)
+    f.adx_ok := not use_adx_filter or adx_val >= adx_min
+
+    active = (use_mtf_filter ? 1 : 0) + (use_rsi_filter ? 1 : 0) + (use_adx_filter ? 1 : 0)
+    f.active_count := active
+    f.config_safe  := active == 0 or (use_mtf_filter and use_rsi_filter) or (use_mtf_filter and use_adx_filter)
+    f
+
+method check_all_long(FilterEngine f) =>
+    f.mtf_long_ok and f.rsi_long_ok and f.adx_ok
+
+method check_all_short(FilterEngine f) =>
+    f.mtf_short_ok and f.rsi_short_ok and f.adx_ok
+
+
+//============================================
+// SECTION 5: STATE MACHINE METHODS
+//============================================
+
+method is_flat(TradeState s)  => s.current == 0
+method is_long(TradeState s)  => s.current == 1
+method is_short(TradeState s) => s.current == -1
+
+method lock_motor(TradeState s, string name) =>
+    s.locked_motor := name
+    s
+
+method unlock_motor(TradeState s) =>
+    s.locked_motor := ""
+    s
+
+method arm_long_reclaim(TradeState s, float exit_price) =>
+    s.long_reclaim_armed    := true
+    s.last_long_exit_price  := exit_price
+    s
+
+method disarm_long_reclaim(TradeState s) =>
+    s.long_reclaim_armed := false
+    s
+
+method arm_short_reclaim(TradeState s, float exit_price) =>
+    s.short_reclaim_armed   := true
+    s.last_short_exit_price := exit_price
+    s
+
+method disarm_short_reclaim(TradeState s) =>
+    s.short_reclaim_armed := false
+    s
+
+method clear_long_reentry(TradeState s) =>
+    s.long_reentry_lock := false
+    s
+
+method clear_short_reentry(TradeState s) =>
+    s.short_reentry_lock := false
+    s
+
+// r22: Basit mod exit price kaydetme (3 motor ortak)
+method arm_simple_long_exit(TradeState s, float exit_price) =>
+    s.simple_long_exit_price := exit_price
+    s
+
+method arm_simple_short_exit(TradeState s, float exit_price) =>
+    s.simple_short_exit_price := exit_price
+    s
+
+// FIX r07: reset_on_entry fonksiyonu -> method'a donusturuldu (CE10175 fix)
+// r25: is_simple parametresi — giris anindaki mod kilitlenir
+method apply_entry(TradeState s, string entry_source, int dir, string motor, bool is_simple) =>
+    s.current           := dir
+    s.locked_motor      := motor
+    s.locked_simple     := is_simple
+    s.long_reentry_lock := false
+    s.short_reentry_lock:= false
+    s.long_reclaim_armed := false
+    s.short_reclaim_armed:= false
+    s.last_entry_source := entry_source
+    s
+
+
+//============================================
+//============================================
+// SECTION 6: DASHBOARD HELPERS
+//============================================
+
+// NOT: dash_text_size_str / status_bg SECTION 2.5'e taşındı (block_bg r27'de silindi)
+// NEDEN: get_dashboard_bg (SECTION 3) status_bg'yi çağırıyor.
+//        Pine v6'da forward reference yasak — önce tanımla, sonra çağır.
+
+render_motor_section(table tbl, int row_start, Motor at, Motor gc, Motor st, Motor ema, int ts, string active) =>
+    row = row_start
+    dts      = dash_text_size_str(dashboard_size)
+    label_bg = color.rgb(46, 54, 66)
+
+    // AT
+    at_active = active == MOTOR_AT_EMA
+    at_txt    = at.get_dashboard_text(ts, at_active)
+    at_bg     = at.get_dashboard_bg(ts, at_active)
+    table.cell(tbl, 0, row, "AT EMA", text_color=color.white, bgcolor=label_bg, text_size=dts)
+    table.cell(tbl, 1, row, at_txt,   text_color=color.white, bgcolor=at_bg,    text_size=dts)
+    row += 1
+
+    // GC
+    gc_active = active == MOTOR_GC_EMA
+    gc_txt    = gc.get_dashboard_text(ts, gc_active)
+    gc_bg     = gc.get_dashboard_bg(ts, gc_active)
+    table.cell(tbl, 0, row, "GC EMA", text_color=color.white, bgcolor=label_bg, text_size=dts)
+    table.cell(tbl, 1, row, gc_txt,   text_color=color.white, bgcolor=gc_bg,    text_size=dts)
+    row += 1
+
+    // ST
+    st_active = active == MOTOR_ST_EMA
+    st_txt    = st.get_dashboard_text(ts, st_active)
+    st_bg     = st.get_dashboard_bg(ts, st_active)
+    table.cell(tbl, 0, row, "ST EMA", text_color=color.white, bgcolor=label_bg, text_size=dts)
+    table.cell(tbl, 1, row, st_txt,   text_color=color.white, bgcolor=st_bg,    text_size=dts)
+    row += 1
+
+    // r23: EMA Motor
+    ema_active = active == MOTOR_EMA_EMA
+    ema_txt    = ema.get_dashboard_text(ts, ema_active)
+    ema_bg     = ema.get_dashboard_bg(ts, ema_active)
+    table.cell(tbl, 0, row, "EMA EMA", text_color=color.white, bgcolor=label_bg, text_size=dts)
+    table.cell(tbl, 1, row, ema_txt,   text_color=color.white, bgcolor=ema_bg,   text_size=dts)
+    row += 1
+
+    row
+
+render_filter_section(table tbl, int row_start, FilterEngine f) =>
+    row = row_start
+    dts      = dash_text_size_str(dashboard_size)
+    hdr      = color.rgb(18, 24, 32)
+    label_bg = color.rgb(46, 54, 66)
+
+    // K3 (r26): config_safe gorunur kilindi (eski "DURUM" basligi yerine).
+    // FILTRESIZ: filtre yok | GUVENLI: kombinasyon ok | TEK FILTRE: yalniz RSI/ADX (whipsaw riski)
+    cfg_text = f.active_count == 0 ? "FILTRESIZ" : f.config_safe ? "GUVENLI" : "⚠ TEK FILTRE"
+    cfg_bg   = f.active_count == 0 ? color.rgb(70, 70, 70) : f.config_safe ? color.rgb(20, 120, 80) : color.rgb(170, 110, 20)
+    table.cell(tbl, 0, row, "FILTRE", text_color=color.white, bgcolor=hdr, text_size=dts)
+    table.cell(tbl, 1, row, cfg_text, text_color=color.white, bgcolor=cfg_bg, text_size=dts)
+    row += 1
+
+    mtf_text = f.mtf_active ? (f.mtf_long_ok ? "LONG" : f.mtf_short_ok ? "SHORT" : "MIX") : "KAPALI"
+    mtf_bg   = f.mtf_active ? status_bg(f.mtf_long_ok, f.mtf_short_ok) : color.rgb(70, 70, 70)
+    table.cell(tbl, 0, row, "MTF",  text_color=color.white, bgcolor=label_bg, text_size=dts)
+    table.cell(tbl, 1, row, mtf_text, text_color=color.white, bgcolor=mtf_bg, text_size=dts)
+    row += 1
+
+    rsi_text = use_rsi_filter ? (f.rsi_long_ok ? "LONG" : f.rsi_short_ok ? "SHORT" : "MIX") : "KAPALI"
+    rsi_bg   = use_rsi_filter ? status_bg(f.rsi_long_ok, f.rsi_short_ok) : color.rgb(70, 70, 70)
+    table.cell(tbl, 0, row, "RSI",  text_color=color.white, bgcolor=label_bg, text_size=dts)
+    table.cell(tbl, 1, row, rsi_text, text_color=color.white, bgcolor=rsi_bg, text_size=dts)
+    row += 1
+
+    adx_text = use_adx_filter ? (f.adx_ok ? "OK" : "ZAYIF") : "KAPALI"
+    adx_bg   = use_adx_filter ? (f.adx_ok ? color.rgb(20, 140, 95) : color.rgb(150, 35, 35)) : color.rgb(70, 70, 70)
+    table.cell(tbl, 0, row, "ADX",  text_color=color.white, bgcolor=label_bg, text_size=dts)
+    table.cell(tbl, 1, row, adx_text, text_color=color.white, bgcolor=adx_bg, text_size=dts)
+    row += 1
+
+    row
+
+// r28: state bolumu sadelestirildi — DURUM/INFO basligi (dekoratif), SON GIRIS
+// (grafikteki L/S ile mukerrer), RECLAIM (nis), BLOK (debug sayaci) kaldirildi.
+// ac (AuditCounters) parametresi yerine mode_mismatch (K6) geldi. Sayaclar iceride
+// birikmeye devam eder (audit globali), sadece panelde gosterilmez.
+render_state_section(table tbl, int row_start, TradeState s, bool mode_mismatch) =>
+    row = row_start
+    dts      = dash_text_size_str(dashboard_size)
+    label_bg = color.rgb(46, 54, 66)
+
+    state_text = s.current == 0 ? "FLAT" : s.current == 1 ? "LONG" : "SHORT"
+    state_bg   = s.current == 0 ? color.rgb(70, 70, 70) : s.current == 1 ? color.rgb(20, 140, 95) : color.rgb(150, 35, 35)
+    table.cell(tbl, 0, row, "POZISYON", text_color=color.white, bgcolor=label_bg, text_size=dts)
+    table.cell(tbl, 1, row, state_text,  text_color=color.white, bgcolor=state_bg, text_size=dts)
+    row += 1
+
+    // r25: locked_motor + kilitli mod (H=Hibrit, B=Basit) — sadece pozisyon acikken
+    // K6 (r28): pozisyon-ortasi mod degisimi (simple_active != locked_simple) varsa
+    // KILITLI satiri kirmizi + "⚠MOD!" — K5'in sessizce hallettigi durumu gorunur
+    // kilar (kullanici canli'da yanlislikla modu degistirdiyse anlar).
+    locked_mode_tag = s.current == 0 ? "" : (s.locked_simple ? " (B)" : " (H)")
+    locked_text = (mode_mismatch ? s.locked_motor + locked_mode_tag + " ⚠MOD!" :
+                   s.locked_motor == "" ? "YOK" :
+                   s.locked_motor + locked_mode_tag)
+    locked_bg   = mode_mismatch ? color.rgb(180, 60, 60) : (s.locked_motor == "" ? color.rgb(70, 70, 70) : color.rgb(100, 100, 140))
+    table.cell(tbl, 0, row, "KILITLI", text_color=color.white, bgcolor=label_bg, text_size=dts)
+    table.cell(tbl, 1, row, locked_text, text_color=color.white, bgcolor=locked_bg, text_size=dts)
+    row += 1
+
+    exit_text = s.last_exit_reason == "" ? "YOK" : s.last_exit_reason
+    table.cell(tbl, 0, row, "SON CIKIS", text_color=color.white, bgcolor=label_bg, text_size=dts)
+    table.cell(tbl, 1, row, exit_text,    text_color=color.white, bgcolor=color.rgb(70, 70, 70), text_size=dts)
+    row += 1
+
+    row
+
+
+//============================================
+// SECTION 7: MAIN STRATEGY LOGIC
+//============================================
+
+var state   = TradeState.new(0, "", false, false, 0.0, 0.0, false, false, na, na, "", "", na, na, na, false)
+var audit   = AuditCounters.new(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+var filters = FilterEngine.new(false, false, false, false, false, false, 0, false, 0, 0)
+
+var at_motor  = Motor.new(MOTOR_AT_EMA,  0.0, false, false, false, false)
+var gc_motor  = Motor.new(MOTOR_GC_EMA,  0.0, false, false, false, false)
+var st_motor  = Motor.new(MOTOR_ST_EMA,  0.0, false, false, false, false)
+var ema_motor = Motor.new(MOTOR_EMA_EMA, 0.0, false, false, false, false)
+
+confirmed_bar = barstate.isconfirmed
+var string last_block_reason = ""
+
+regime_ema            = ta.ema(close, ema_len)
+at_motor.line_value  := calc_alphatrend(at_len, at_mult)
+gc_motor.line_value  := calc_gchannel(gc_len)
+[st_line, _st_dir]    = ta.supertrend(st_factor, st_atr_len)
+st_motor.line_value  := st_line
+ema_motor.line_value := ta.ema(close, ema_motor_len)
+
+// --- ACTIVE MOTOR SELECTION (r24: active_mode bazli) ---
+
+work_hybrid       = active_mode == MODE_M1
+work_simple       = active_mode == MODE_M2
+active_motor_name = work_hybrid ? motor1_choice : motor2_choice
+
+using_atema       = active_motor_name == MOTOR_AT_EMA
+using_gcema       = active_motor_name == MOTOR_GC_EMA
+using_stema       = active_motor_name == MOTOR_ST_EMA
+using_emaema      = active_motor_name == MOTOR_EMA_EMA
+active_motor_line = (using_atema  ? at_motor.line_value  :
+                     using_gcema  ? gc_motor.line_value  :
+                     using_stema  ? st_motor.line_value  :
+                                    ema_motor.line_value)
+
+// K2 (r26): EMA Motor hibrit cakisma tespiti
+// Motor 1 (hibrit) + EMA EMA + (ema_motor_len == ema_len) ise:
+// line == regime_ema olur, "line > regime_ema" kosulu HEP false,
+// hibrit modda HICBIR islem acilmaz. Bu sessiz basarisizligi gorunur kil.
+ema_hybrid_conflict = work_hybrid and using_emaema and (ema_motor_len == ema_len)
+
+// --- UPDATE MOTORS (FIX: regime_threshold parametresi kaldırıldı) ---
+
+at_motor  := at_motor.calculate(close, regime_ema)
+gc_motor  := gc_motor.calculate(close, regime_ema)
+st_motor  := st_motor.calculate(close, regime_ema)
+ema_motor := ema_motor.calculate(close, regime_ema)
+
+active_motor_long_entry  = (using_atema  ? at_motor.long_entry_ok  :
+                            using_gcema  ? gc_motor.long_entry_ok  :
+                            using_stema  ? st_motor.long_entry_ok  :
+                                           ema_motor.long_entry_ok)
+active_motor_short_entry = (using_atema  ? at_motor.short_entry_ok :
+                            using_gcema  ? gc_motor.short_entry_ok :
+                            using_stema  ? st_motor.short_entry_ok :
+                                           ema_motor.short_entry_ok)
+active_motor_long_hold   = (using_atema  ? at_motor.long_hold_ok   :
+                            using_gcema  ? gc_motor.long_hold_ok   :
+                            using_stema  ? st_motor.long_hold_ok   :
+                                           ema_motor.long_hold_ok)
+active_motor_short_hold  = (using_atema  ? at_motor.short_hold_ok  :
+                            using_gcema  ? gc_motor.short_hold_ok  :
+                            using_stema  ? st_motor.short_hold_ok  :
+                                           ema_motor.short_hold_ok)
+
+// --- r24: BASIT MOD AKTIVASYONU (active_mode bazli) ---
+// simple_active artik dogrudan work_simple'dan gelir.
+// Secili motorun gostergesi (motor2_choice) otomatik aktif olur — eslesme sorunu yok.
+simple_active     = work_simple
+at_simple_active  = simple_active and using_atema
+gc_simple_active  = simple_active and using_gcema
+st_simple_active  = simple_active and using_stema
+ema_simple_active = simple_active and using_emaema
+
+// AT Basit crossover
+at_cross_up   = ta.crossover(close, at_motor.line_value)
+at_cross_down = ta.crossunder(close, at_motor.line_value)
+
+// GC Basit crossover
+gc_cross_up   = ta.crossover(close, gc_motor.line_value)
+gc_cross_down = ta.crossunder(close, gc_motor.line_value)
+
+// ST Basit crossover
+st_cross_up   = ta.crossover(close, st_motor.line_value)
+st_cross_down = ta.crossunder(close, st_motor.line_value)
+
+// r23: EMA Basit crossover
+ema_cross_up   = ta.crossover(close, ema_motor.line_value)
+ema_cross_down = ta.crossunder(close, ema_motor.line_value)
+
+// Re-entry logic (basit mod icin)
+simple_reentry_long  = not na(state.simple_long_exit_price)  and close > state.simple_long_exit_price  and close > active_motor_line
+simple_reentry_short = not na(state.simple_short_exit_price) and close < state.simple_short_exit_price and close < active_motor_line
+
+// Her motor icin primary signals
+at_simple_long_primary  = at_simple_active and at_cross_up
+at_simple_short_primary = at_simple_active and at_cross_down
+
+gc_simple_long_primary  = gc_simple_active and gc_cross_up
+gc_simple_short_primary = gc_simple_active and gc_cross_down
+
+st_simple_long_primary  = st_simple_active and st_cross_up
+st_simple_short_primary = st_simple_active and st_cross_down
+
+// r23: EMA Motor primary signals
+ema_simple_long_primary  = ema_simple_active and ema_cross_up
+ema_simple_short_primary = ema_simple_active and ema_cross_down
+
+// Ortak basit mod primary signals
+simple_long_primary  = at_simple_long_primary  or gc_simple_long_primary  or st_simple_long_primary  or ema_simple_long_primary
+simple_short_primary = at_simple_short_primary or gc_simple_short_primary or st_simple_short_primary or ema_simple_short_primary
+
+// Basit mod re-entry (sadece simple_active ise)
+simple_long_reentry  = simple_active and simple_reentry_long
+simple_short_reentry = simple_active and simple_reentry_short
+
+// Basit mod raw signals (primary + reentry)
+simple_raw_long  = simple_long_primary  or simple_long_reentry
+simple_raw_short = simple_short_primary or simple_short_reentry
+
+// --- REGIME PERSISTENCE ---
+
+var int hybrid_long_hold_bars  = 0
+var int hybrid_short_hold_bars = 0
+
+// r22: Persistence hesaplamasi — Basit modda crossover bazli, Hibrit modda rejim bazli
+persistence_long_condition  = simple_active ? simple_raw_long  : active_motor_long_entry
+persistence_short_condition = simple_active ? simple_raw_short : active_motor_short_entry
+
+hybrid_long_hold_bars  := persistence_long_condition  ? hybrid_long_hold_bars  + 1 : 0
+hybrid_short_hold_bars := persistence_short_condition ? hybrid_short_hold_bars + 1 : 0
+
+hybrid_long_persist_ok  = not use_regime_persistence or hybrid_long_hold_bars  >= regime_persistence_bars
+hybrid_short_persist_ok = not use_regime_persistence or hybrid_short_hold_bars >= regime_persistence_bars
+
+// r22: entry_long_ok / entry_short_ok — mod'a gore farkli
+entry_long_ok  = simple_active ? (simple_raw_long  and hybrid_long_persist_ok) : (active_motor_long_entry  and hybrid_long_persist_ok)
+entry_short_ok = simple_active ? (simple_raw_short and hybrid_short_persist_ok) : (active_motor_short_entry and hybrid_short_persist_ok)
+
+// --- FILTERS ---
+
+filters            := filters.update_filters(close, regime_ema)
+all_long_filters_ok = filters.check_all_long()
+all_short_filters_ok = filters.check_all_short()
+
+// --- EFFECTIVE MOTOR (kilitli motor — pozisyon süresince korunur) ---
+
+in_position    = state.current != 0
+eff_motor_name = in_position and state.locked_motor != "" ? state.locked_motor : active_motor_name
+
+eff_motor_line = (in_position ?
+     (state.locked_motor == MOTOR_AT_EMA  ? at_motor.line_value  :
+      state.locked_motor == MOTOR_GC_EMA  ? gc_motor.line_value  :
+      state.locked_motor == MOTOR_ST_EMA  ? st_motor.line_value  :
+      state.locked_motor == MOTOR_EMA_EMA ? ema_motor.line_value :
+                                            active_motor_line)   :
+     active_motor_line)
+
+eff_long_hold  = (in_position ?
+     (state.locked_motor == MOTOR_AT_EMA  ? at_motor.long_hold_ok  :
+      state.locked_motor == MOTOR_GC_EMA  ? gc_motor.long_hold_ok  :
+      state.locked_motor == MOTOR_ST_EMA  ? st_motor.long_hold_ok  :
+      state.locked_motor == MOTOR_EMA_EMA ? ema_motor.long_hold_ok :
+                                            active_motor_long_hold) :
+     active_motor_long_hold)
+
+eff_short_hold = (in_position ?
+     (state.locked_motor == MOTOR_AT_EMA  ? at_motor.short_hold_ok  :
+      state.locked_motor == MOTOR_GC_EMA  ? gc_motor.short_hold_ok  :
+      state.locked_motor == MOTOR_ST_EMA  ? st_motor.short_hold_ok  :
+      state.locked_motor == MOTOR_EMA_EMA ? ema_motor.short_hold_ok :
+                                            active_motor_short_hold) :
+     active_motor_short_hold)
+
+// --- ENTRY SIGNALS ---
+
+// r22: Primary sinyal — mod'a gore farkli
+long_primary  = confirmed_bar and entry_long_ok  and not entry_long_ok[1]
+short_primary = confirmed_bar and entry_short_ok and not entry_short_ok[1]
+
+// Hibrit mod reclaim (sadece Basit mod degilse)
+reclaim_long  = not simple_active and confirmed_bar and state.long_reclaim_armed  and not na(state.last_long_exit_price)  and close[1] <= state.last_long_exit_price  and close > state.last_long_exit_price  and entry_long_ok
+reclaim_short = not simple_active and confirmed_bar and state.short_reclaim_armed and not na(state.last_short_exit_price) and close[1] >= state.last_short_exit_price and close < state.last_short_exit_price and entry_short_ok
+
+raw_long_signal  = long_primary  or reclaim_long
+raw_short_signal = short_primary or reclaim_short
+
+long_entry_source  = long_primary  ? "ANA_GIRIS" : reclaim_long  ? "GERI_KAZANIM" : "YOK"
+short_entry_source = short_primary ? "ANA_GIRIS" : reclaim_short ? "GERI_KAZANIM" : "YOK"
+
+gated_long_signal  = raw_long_signal  and all_long_filters_ok
+gated_short_signal = raw_short_signal and all_short_filters_ok
+
+// Reclaim disarm — karşı yön gelince iptal (sadece Hibrit modda)
+if not simple_active
+    if state.long_reclaim_armed  and active_motor_short_entry
+        state := state.disarm_long_reclaim()
+    if state.short_reclaim_armed and active_motor_long_entry
+        state := state.disarm_short_reclaim()
+
+// Backtest window
+in_backtest_window = bar_index >= (last_bar_index - 3999)
+
+// FIX r09: cooldown configurable — 0 = sadece cikis bari engellenir, N = N bar bekle
+cooldown_ok = na(state.last_exit_bar) or (bar_index - state.last_exit_bar > cooldown_bars)
+
+long_signal_base  = gated_long_signal  and cooldown_ok and in_backtest_window
+short_signal_base = gated_short_signal and cooldown_ok and in_backtest_window
+
+long_signal  = long_signal_base  and allow_long_entries
+short_signal = short_signal_base and allow_short_entries
+
+// --- EXIT CONDITIONS ---
+
+// r25: EFEKTIF MOD — pozisyon acikken giris modu kilitli kalir.
+// Flat iken guncel active_mode (simple_active), pozisyon acikken locked_simple.
+// Boylece pozisyon ortasinda mod degisimi acik pozisyonu etkilemez.
+eff_simple = in_position ? state.locked_simple : simple_active
+
+// r22: Exit mantigi — mod'a gore farkli
+// Hibrit mod: motor stop (hold_ok kaybedince)
+// Basit mod: crossover exit (line kaybedince)
+
+motor_stop_long  = not eff_simple and confirmed_bar and state.is_long()  and not eff_long_hold
+motor_stop_short = not eff_simple and confirmed_bar and state.is_short() and not eff_short_hold
+
+// K4 (r27): EFEKTIF CROSSOVER — basit exit KILITLI motorun line'ini takip eder.
+// Eski hata: 4 motorun crossover'i OR'lanip secili motor yok sayiliyordu (GC ile
+// girip AT crossunder'inda cikma). Artik eff_motor_line ile simetrik: pozisyon
+// hangi motorla acildiysa AYNI motorun crossover'inda kapanir.
+// (Pozisyon icinde locked_motor her zaman 4 motordan biri; "" fallback => false.)
+eff_cross_up   = (state.locked_motor == MOTOR_AT_EMA  ? at_cross_up   :
+                  state.locked_motor == MOTOR_GC_EMA  ? gc_cross_up   :
+                  state.locked_motor == MOTOR_ST_EMA  ? st_cross_up   :
+                  state.locked_motor == MOTOR_EMA_EMA ? ema_cross_up  :
+                                                        false)
+eff_cross_down = (state.locked_motor == MOTOR_AT_EMA  ? at_cross_down  :
+                  state.locked_motor == MOTOR_GC_EMA  ? gc_cross_down  :
+                  state.locked_motor == MOTOR_ST_EMA  ? st_cross_down  :
+                  state.locked_motor == MOTOR_EMA_EMA ? ema_cross_down :
+                                                        false)
+
+// Basit mod exit — KILITLI motorun line'ini takip eder (K4 r27)
+simple_exit_long  = eff_simple and confirmed_bar and state.is_long()  and eff_cross_down
+simple_exit_short = eff_simple and confirmed_bar and state.is_short() and eff_cross_up
+
+// FIX r09 [KRITIK]: state.is_long() <-> state.is_short() swap'i duzeltildi.
+// Semantik: reverse_long = "long pozisyondan cikiliyor, short'a donulecek"
+// r08'de kosullar tersti -> reverse hicbir zaman gercek pozisyonu kapatmiyordu.
+//
+// K5 (r27): MOD TUTARLILIK GATE'i. reverse, short_primary/long_primary uzerinden
+// GUNCEL simple_active'den besleniyor. Pozisyon-ortasi mod degisiminde (canli/
+// forward) hibrit-kilitli pozisyon, basit modun crossover'iyla ters cevrilebiliyordu
+// (r25 sizintisi). Mod eslesmiyorsa reverse bastirilir; pozisyon kilitli exit
+// mantigiyla (motor_stop/simple_exit) kapanir, yeni giris guncel modda yapilir.
+// Backtest'te mod sabit => mode_consistent HEP true => davranis degismez.
+mode_consistent = simple_active == state.locked_simple
+reverse_long  = state.is_long()  and short_primary and short_signal_base and mode_consistent
+reverse_short = state.is_short() and long_primary  and long_signal_base  and mode_consistent
+
+// --- BLOCK DETECTION ---
+
+dbg_regime_block_long  = raw_long_signal  and not entry_long_ok
+dbg_regime_block_short = raw_short_signal and not entry_short_ok
+dbg_persist_block_long  = raw_long_signal  and persistence_long_condition  and not hybrid_long_persist_ok
+dbg_persist_block_short = raw_short_signal and persistence_short_condition and not hybrid_short_persist_ok
+dbg_filter_block_long  = raw_long_signal  and entry_long_ok  and not all_long_filters_ok
+dbg_filter_block_short = raw_short_signal and entry_short_ok and not all_short_filters_ok
+dbg_reclaim_block_long  = reclaim_long  and not entry_long_ok
+dbg_reclaim_block_short = reclaim_short and not entry_short_ok
+
+if confirmed_bar
+    audit.regime_blocks  += (dbg_regime_block_long  ? 1 : 0) + (dbg_regime_block_short  ? 1 : 0)
+    audit.persist_blocks += (dbg_persist_block_long ? 1 : 0) + (dbg_persist_block_short ? 1 : 0)
+    audit.filter_blocks  += (dbg_filter_block_long  ? 1 : 0) + (dbg_filter_block_short  ? 1 : 0)
+    audit.reclaim_blocks += (dbg_reclaim_block_long ? 1 : 0) + (dbg_reclaim_block_short ? 1 : 0)
+
+block_reason_now = (
+     dbg_reclaim_block_long or dbg_reclaim_block_short ? "RECLAIM" :
+     dbg_persist_block_long or dbg_persist_block_short ? "KALICILIK" :
+     dbg_regime_block_long  or dbg_regime_block_short  ? "REJIM" :
+     dbg_filter_block_long  or dbg_filter_block_short  ? "FILTRE" : "YOK")
+
+if confirmed_bar and block_reason_now != "YOK"
+    last_block_reason := block_reason_now
+
+// --- ORDER EXECUTION ---
+
+exit_happened = false
+
+// Reverse exit
+if reverse_long and not exit_happened
+    strategy.close("Long", comment=eff_motor_name + " REV")
+    state.last_exit_reason := eff_motor_name + " REV"
+    exit_happened := true
+
+if reverse_short and not exit_happened
+    strategy.close("Short", comment=eff_motor_name + " REV")
+    state.last_exit_reason := eff_motor_name + " REV"
+    exit_happened := true
+
+// Motor stop (Hibrit mod)
+if motor_stop_long and not exit_happened
+    strategy.close("Long", comment=eff_motor_name + " STOP")
+    state.last_exit_reason := eff_motor_name + " STOP"
+    exit_happened := true
+    if close > regime_ema
+        state := state.arm_long_reclaim(eff_motor_line)
+        audit.mix_ema_ok_motor_fail += 1
+    else
+        audit.mix_both_fail += 1
+
+if motor_stop_short and not exit_happened
+    strategy.close("Short", comment=eff_motor_name + " STOP")
+    state.last_exit_reason := eff_motor_name + " STOP"
+    exit_happened := true
+    if close < regime_ema
+        state := state.arm_short_reclaim(eff_motor_line)
+        audit.mix_ema_ok_motor_fail += 1
+    else
+        audit.mix_both_fail += 1
+
+// r24: Basit mod exit (4 motor) — comment artik aktif gosterge adi
+if simple_exit_long and not exit_happened
+    strategy.close("Long", comment=active_motor_name + " BASIT")
+    state.last_exit_reason := active_motor_name + " BASIT"
+    state := state.arm_simple_long_exit(close)
+    exit_happened := true
+
+if simple_exit_short and not exit_happened
+    strategy.close("Short", comment=active_motor_name + " BASIT")
+    state.last_exit_reason := active_motor_name + " BASIT"
+    state := state.arm_simple_short_exit(close)
+    exit_happened := true
+
+// State cleanup
+if exit_happened
+    state.current       := 0
+    state               := state.unlock_motor()
+    state.last_exit_bar := bar_index
+
+// --- ENTRY EXECUTION ---
+
+entry_flat_now      = state.is_flat()
+fire_long_reversal  = reverse_short and allow_long_entries
+fire_short_reversal = reverse_long  and allow_short_entries
+fire_long_flat      = long_signal  and entry_flat_now and not exit_happened and not fire_long_reversal
+fire_short_flat     = short_signal and entry_flat_now and not exit_happened and not fire_short_reversal
+
+if fire_long_reversal
+    strategy.entry("Long", strategy.long, qty=trade_contracts)
+    state := state.apply_entry(long_entry_source, 1, active_motor_name, simple_active)
+
+if fire_short_reversal
+    strategy.entry("Short", strategy.short, qty=trade_contracts)
+    state := state.apply_entry(short_entry_source, -1, active_motor_name, simple_active)
+
+if fire_long_flat
+    strategy.entry("Long", strategy.long, qty=trade_contracts)
+    state := state.apply_entry(long_entry_source, 1, active_motor_name, simple_active)
+
+if fire_short_flat
+    strategy.entry("Short", strategy.short, qty=trade_contracts)
+    state := state.apply_entry(short_entry_source, -1, active_motor_name, simple_active)
+
+//============================================
+// SECTION 8: VISUALIZATION
+//============================================
+
+plot(show_regime_ema_plot ? regime_ema        : na, "EMA200", color=color.gray,  linewidth=2)
+plot(show_motor_plot      ? active_motor_line  : na, "Motor",  color=color.black, linewidth=2)
+
+// K2 (r26): EMA hibrit cakismasi varsa grafigi hafif kirmizi boya.
+// Dashboard kapali olsa bile kullanici "neden islem yok" sorusunu gorur.
+bgcolor(ema_hybrid_conflict ? color.new(color.red, 88) : na, title="EMA=Rejim Cakisma Uyarisi")
+
+plot_long_entry  = fire_long_reversal  or fire_long_flat
+plot_short_entry = fire_short_reversal or fire_short_flat
+
+plotshape(show_shapes and plot_long_entry,  title="Long",  style=shape.triangleup,
+     location=location.belowbar, color=color.lime, size=size.small, text="L")
+plotshape(show_shapes and plot_short_entry, title="Short", style=shape.triangledown,
+     location=location.abovebar, color=color.red,  size=size.small, text="S")
+
+//============================================
+// SECTION 9: DASHBOARD
+//============================================
+
+dashboard_pos = (
+     dashboard_y == "top" ?
+          (dashboard_x == "left" ? position.top_left    : dashboard_x == "center" ? position.top_center    : position.top_right)    :
+     dashboard_y == "middle" ?
+          (dashboard_x == "left" ? position.middle_left : dashboard_x == "center" ? position.middle_center : position.middle_right) :
+          (dashboard_x == "left" ? position.bottom_left : dashboard_x == "center" ? position.bottom_center : position.bottom_right))
+
+dash_key = dashboard_y + "|" + dashboard_x + "|" + dashboard_size
+
+var string dash_key_prev  = ""
+var bool   dash_show_prev = false
+var table  dash           = na
+
+dash_needs_rebuild = na(dash) or dash_key != dash_key_prev or show_dashboard != dash_show_prev
+
+if dash_needs_rebuild
+    if not na(dash)
+        table.delete(dash)
+    dash           := show_dashboard ? table.new(dashboard_pos, 2, 16, border_width=1) : na
+    dash_key_prev  := dash_key
+    dash_show_prev := show_dashboard
+
+if show_dashboard and na(dash)
+    dash           := table.new(dashboard_pos, 2, 16, border_width=1)
+    dash_key_prev  := dash_key
+    dash_show_prev := show_dashboard
+
+if show_dashboard and not na(dash)
+    table.clear(dash, 0, 0, 1, 15)
+    dts      = dash_text_size_str(dashboard_size)
+    hdr      = color.rgb(18, 24, 32)
+    label_bg = color.rgb(46, 54, 66)
+    row      = 0
+
+    // Header
+    table.cell(dash, 0, row, "KALEM", text_color=color.white, bgcolor=hdr, text_size=dts)
+    table.cell(dash, 1, row, "DURUM", text_color=color.white, bgcolor=hdr, text_size=dts)
+    row += 1
+
+    // r24: MOD goruntuleme (Motor 1 Hibrit / Motor 2 Basit)
+    mode_text = work_simple ? "BASIT (M2)" : "HIBRIT (M1)"
+    mode_bg   = work_simple ? color.rgb(100, 100, 200) : color.rgb(60, 90, 140)
+    table.cell(dash, 0, row, "MOD", text_color=color.white, bgcolor=label_bg, text_size=dts)
+    table.cell(dash, 1, row, mode_text, text_color=color.white, bgcolor=mode_bg, text_size=dts)
+    row += 1
+
+    // r24: MOTOR 1 satiri (hibrit gosterge) — aktifse parlak yesil, degilse soluk
+    // K2 (r26): cakisma varsa kirmizi + uyari (islem acilmaz sebebi gorunur)
+    m1_text = motor1_choice + (ema_hybrid_conflict ? "  ⚠EMA=REJIM" : (work_hybrid ? "  ● AKTIF" : ""))
+    m1_bg   = ema_hybrid_conflict ? color.rgb(180, 60, 60) : (work_hybrid ? color.rgb(20, 140, 95) : color.rgb(55, 55, 55))
+    table.cell(dash, 0, row, "MOTOR 1", text_color=color.white, bgcolor=label_bg, text_size=dts)
+    table.cell(dash, 1, row, m1_text, text_color=color.white, bgcolor=m1_bg, text_size=dts)
+    row += 1
+
+    // r24: MOTOR 2 satiri (basit gosterge) — aktifse parlak mor, degilse soluk
+    m2_text = motor2_choice + " Basit" + (work_simple ? "  ● AKTIF" : "")
+    m2_bg   = work_simple ? color.rgb(100, 100, 200) : color.rgb(55, 55, 55)
+    table.cell(dash, 0, row, "MOTOR 2", text_color=color.white, bgcolor=label_bg, text_size=dts)
+    table.cell(dash, 1, row, m2_text, text_color=color.white, bgcolor=m2_bg, text_size=dts)
+    row += 1
+
+    // Rejim
+    regime_state = entry_long_ok ? "LONG" : entry_short_ok ? "SHORT" : "NEUTRAL"
+    table.cell(dash, 0, row, "REJIM",     text_color=color.white, bgcolor=label_bg, text_size=dts)
+    table.cell(dash, 1, row, regime_state,text_color=color.white, bgcolor=status_bg(entry_long_ok, entry_short_ok), text_size=dts)
+    row += 1
+
+    // r28: KALICILIK satiri kaldirildi (varsayilan kapali iken sadece "KAPALI"
+    // gosteriyordu = olu agirlik). ONCELIK 2'de persistence test edilirse geri
+    // eklenir (3 satir). hybrid_*_hold_bars sayaclari iceride hesaplanmaya devam eder.
+
+    // K6 (r28): pozisyon-ortasi mod uyumsuzlugu — KILITLI satirinda gosterilir
+    kilit_mode_mismatch = in_position and (simple_active != state.locked_simple)
+
+    // Motor detay + Filtre + State sections
+    row := render_motor_section(dash, row, at_motor, gc_motor, st_motor, ema_motor, state.current, active_motor_name)
+    row := render_filter_section(dash, row, filters)
+    row := render_state_section(dash, row, state, kilit_mode_mismatch)
