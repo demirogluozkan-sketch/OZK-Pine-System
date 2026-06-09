@@ -1,0 +1,1094 @@
+================================================================
+OZK LEAN MODULAR SYSTEM — 3 MOTOR v2.7 MOD
+DEVİR / BAĞLAM PROMPTU (KOMPAKT)
+================================================================
+Tarih : 2026-06-07
+Dosya : OZK_3Motor_v2_7_Mod_r32.pine
+Revizyon: r32 (EMA sadelestirme — tek EMA periyodu: rejim + EMA motor birlesti)
+----------------------------------------------------------------
+
+## YENI SOHBETE BASLARKEN
+Bu dosya ile birlikte su .pine dosyasi yuklenmeli:
+  OZK_3Motor_v2_7_Mod_r32.pine
+Bu prompt, sistemin tum baglamini ve devam noktalarini icerir.
+Mevcut durum: r32 stable. EMA'lar sadelesti — artik TEK "EMA Periyot" girdisi
+(ema_motor_len, "1. Hibrit Rejim" grubu, default 200) hem hibrit rejim cizgisini hem
+Motor 2 "EMA EMA" sinyalini besler. Eski "EMA200 Length" (ema_len) kaldirildi.
+Motor 1 (hibrit) seceneklerinden EMA EMA cikti. K2 (ema_hybrid_conflict) tamamen kalkti.
+Dashboard 2 panelli (r30); mimari pick() ile sade (r31).
+
+IS AKISI: (a) Motor 2 + EMA EMA -> "EMA Periyot"u tara, en karli degeri bul (Panel 2).
+(b) Ayni deger secili iken Motor 1 (hibrit): EMA hem giris kapisi hem cikis; AT/GC/ST
+giris onayini ekler. (c) Veya Motor 2 + AT/GC/ST: EMA'siz saf crossover.
+
+!! r31 DOGRULAMA BORCU HALA ACIK: r31 pick()/fan-out refactor'u logic-equivalent
+hedeflendi, TradingView'da dogrulanmadi. r32 hibrit default'u (EMA 200) r31 ile ayni.
+Once r30/r31 esitligini dogrula, sonra r32 EMA taramasina basla.
+
+Sirada (kullanici onayina bagli): ONCELIK 1 (EMA periyot taramasi — artik tek girdi)
+veya r33 = renk sabitleri (kozmetik, r31'den ertelendi).
+
+!! ONEMLI — r27 BACKTEST ETKISI (HALA GECERLI):
+K4 duzeltmesi (basit exit kilitli motoru takip eder) BASIT MOD backtest sayilarini
+DEGISTIRDI. r26 ve oncesi basit mod backtest sonuclari GECERSIZ — yeniden alinmali.
+Hibrit mod etkilenmez. (r28/r29/r30 ISLEM MANTIGINA DOKUNMADI. r31 LOGIC-EQUIVALENT
+hedeflendi — backtest sayilari r27 ile AYNI OLMALI ama TradingView'da dogrulanmadi.)
+
+!! r32 BACKTEST ETKISI: Hibrit rejim cizgisi artik ema_motor_len'e bagli (eski sabit
+ema_len=200 yerine). Default ema_motor_len=200 oldugu icin HIBRIT DEFAULT BACKTEST r31
+ILE AYNI. "EMA Periyot"u 200'den degistirince hibrit sonuclari degisir (BEKLENEN — is
+akisinin amaci bu). Basit mod etkilenmez. Tek davranissal kaldirma: motor1=EMA EMA
+secenegi (default degildi; secen biri varsa AT EMA'ya duser).
+
+!! r32 TradingView NOTU: "EMA200 Length" girdisi kaldirildi; ema_motor_len'in grubu
+("2. Motor Secimi" -> "1. Hibrit Rejim"), adi ("EMA Motor Periyot" -> "EMA Periyot
+(Rejim + EMA Motor)") ve default'u (50 -> 200) degisti. Script guncellenince kayitli
+degerler sifirlanabilir; "EMA Periyot"u (200 veya istedigin) ve motor1 gostergesini
+(AT EMA default) kontrol et.
+----------------------------------------------------------------
+
+## PROJE TANIMI
+
+Pine Script v6 strateji dosyası — TradingView backtest için.
+Modüler type/method yapısı: 4 type, 15+ method, 9 section.
+
+**Strateji ayarları:**
+- Komisyon: %0.01 (commission_value=0.01)
+- Sermaye : 100.000 TL (initial_capital=100000)
+- Backtest: Son 4000 bar (in_backtest_window = bar_index >= last_bar_index - 3999)
+
+**MOTOR SECIM MIMARISI (r24 — mutually exclusive):**
+Tek bir "AKTIF MOTOR" secicisi (active_mode) ile sadece BIRI calisir:
+- **Motor 1 (Hibrit)** — motor1_choice gostergesi + EMA200 + Price uclu kosul
+- **Motor 2 (Basit)**  — motor2_choice gostergesi, sadece line crossover (EMA200 YOK)
+
+Her iki motorun gosterge secenekleri ayni (bagimsiz dropdownlar):
+- AT EMA  (AlphaTrend — RSI-based)
+- GC EMA  (G-Channel — midband)
+- ST EMA  (SuperTrend — ATR-based)
+- EMA EMA (Saf EMA — optimal periyot arama)
+
+**r24 NEDEN ONEMLI:**
+- ESKI YAPI (r23): motor_choice + simple_mode iki AYRI dropdown, birbirine
+  bagimli. "simple_mode=GC Basit ama motor_choice=AT" gibi yanlis eslesme
+  hicbir sey calistirmiyordu (and using_atema kontrolu).
+- YENI YAPI (r24): active_mode tek karar noktasi. Secili motorun gostergesi
+  (motor1/motor2_choice) OTOMATIK aktif olur. Yanlis eslesme imkansiz.
+- Alt mantik (using_*, simple_active, crossover, exit) DEGISMEDI; sadece
+  besleme katmani degisti.
+
+**EMA Motor kullanim amaci (r23'ten; r32'de TEK girdi):**
+- "EMA Periyot (Rejim + EMA Motor)" input'u ile farkli EMA periyotlari test et
+  (Motor 2 + EMA EMA, filtreler kapali)
+- Max kar veren degeri bul → AYNI girdi zaten hibrit rejimini de besler (kopyalama yok)
+- Motor 1 hibritte: bu EMA hem giris kapisi hem cikis; AT/GC/ST giris onayini ekler
+
+================================================================
+## PINE v6 KRİTİK KURALLAR (ÖNCELİKLE OKU)
+================================================================
+
+Bu kurallar r01-r17 arası yaşanan hataları özetler. Yeni kod yazarken ÖNCE BURAYA BAK.
+
+1. **METHOD TUPLE RETURN YASAK**
+   ```pine
+   method foo(Type t) => [a, b]    // ❌ CE — yasak
+   ```
+   Çözüm: İki ayrı method yaz (get_dashboard_text, get_dashboard_bg)
+
+2. **METHOD İÇİNDE VAR DECLARATION YASAK**
+   ```pine
+   method foo(Type t) =>
+       var int x = 0               // ❌ CE — yasak
+   ```
+   Çözüm: x'i type field yap (FilterEngine.rsi_above_bars)
+
+3. **METHOD İÇİNDE SELF := METHOD() ZİNCİRİ YASAK**
+   ```pine
+   method foo(TradeState s) =>
+       s := s.lock_motor("AT")     // ❌ CE10175 — yasak
+   ```
+   Çözüm: s.locked_motor := "AT" (direkt field atama)
+
+4. **FONKSİYON PARAMETRESİ MUTABLE OLAMAZ**
+   ```pine
+   foo(TradeState s) =>
+       s.field := değer            // ❌ CE10175 — yasak
+   ```
+   Çözüm: method kullan (method'da self mutable)
+
+5. **MULTI-LINE TERNARY — PARANTEZSİZ SORUNLU**
+   ```pine
+   a = cond ? val1 :              // ❌ satır sonu value+: → CE10156
+       cond2 ? val2 : val3
+   ```
+   Çözüm: Dış parantez ekle veya if/else kullan
+
+6. **NZ() BOOL SERİSİ KABUL ETMEZ**
+   ```pine
+   not nz(entry_long_ok[1])       // ❌ CE10123 — yasak
+   not entry_long_ok[1]           // ✅ OK — direkt [1]
+   ```
+
+7. **TEXT_SIZE INT DEĞİL STRING ALIR**
+   ```pine
+   text_size=12                   // ❌ hatalı
+   text_size=size.normal          // ✅ OK
+   ```
+
+8. **TYPE FIELD ÜZERİNDE [N] OPERATÖRÜ YASAK (CE10290)**
+   ```pine
+   at_motor.long_entry_ok[1]      // ❌ CE10290 — yasak
+   ```
+   Çözüm: Önce yerel değişkene al:
+   ```pine
+   _ok = at_motor.long_entry_ok   // yerel bool series
+   _ok[1]                          // ✅ OK
+   ```
+
+9. **MATH.SUM() FLOAT DÖNDÜRÜR — INT FIELD'A CAST GEREKİR (CE10173)**
+   ```pine
+   x := math.sum(...)              // ❌ CE10173 — float→int yasak
+   x := int(math.sum(...))         // ✅ OK — int() cast
+   ```
+
+10. **FORWARD REFERENCE YASAK (CE10271)**
+   ```pine
+   // SECTION 3'te:
+   method foo(Motor m) =>
+       status_bg(...)              // ❌ CE10271 — status_bg henüz tanımlı değil
+   // SECTION 6'da:
+   status_bg(...) => ...           // çok geç!
+   ```
+   Çözüm: Çağrılan fonksiyon her zaman çağırandan ÖNCE gelmeli.
+   Yardımcı fonksiyonlar (status_bg, block_bg, dash_text_size_str) → **SECTION 2.5'e taşı.**
+
+================================================================
+## MİMARİ ÖZETİ
+================================================================
+
+### TYPE YAPISI (SECTION 2)
+
+| TYPE           | ALANLAR                                  | AMAÇ                          |
+|----------------|------------------------------------------|-------------------------------|
+| Motor          | name, line_value, entry_ok, hold_ok, cross_up/down | Her motorun hesaplamalari (r31: cross alanlari) |
+| FilterEngine   | mtf/rsi/adx koşulları, bar sayaçları     | Filtre yönetimi               |
+| TradeState     | current, locked_motor, reentry/reclaim   | State machine                 |
+| AuditCounters  | regime/filter/reentry/cooldown blocks    | Debug sayaçları               |
+
+### METHOD HARAKETİ (SECTION 3-5)
+
+| METHOD                          | TİP            | AMAÇ                                |
+|---------------------------------|----------------|-------------------------------------|
+| calc_alphatrend(len, mult)      | Fonksiyon      | AlphaTrend line hesaplama           |
+| calc_gchannel(len)              | Fonksiyon      | G-Channel midband hesaplama         |
+| Motor.calculate(price, ema200)  | Method         | entry_ok / hold_ok güncelle         |
+| Motor.get_dashboard_text(...)   | Method         | Dashboard metin döndür              |
+| Motor.get_dashboard_bg(...)     | Method         | Dashboard renk döndür               |
+| FilterEngine.update_filters(...) | Method        | MTF/RSI/ADX filtrelerini güncelle   |
+| FilterEngine.check_all_long()   | Method         | Tüm long filtreleri kontrol         |
+| FilterEngine.check_all_short()  | Method         | Tüm short filtreleri kontrol        |
+| TradeState.is_flat/long/short() | Method         | State sorgulama                     |
+| TradeState.lock_motor(name)     | Method         | Motoru kilitle                      |
+| TradeState.unlock_motor()       | Method         | Motoru aç                           |
+| TradeState.arm_*_reclaim(...)   | Method         | Reclaim arm et                      |
+| TradeState.disarm_*_reclaim()   | Method         | Reclaim disarm et                   |
+| TradeState.clear_*_reentry()    | Method         | Reentry kilidini temizle            |
+| TradeState.apply_entry(...)     | Method         | Giriş sıfırlama (lock+clear chain)  |
+
+### DASHBOARD FONKSİYONLARI (SECTION 2.5 + 6)
+
+| FONKSİYON                 | SECTION | AMAÇ                                  |
+|---------------------------|---------|---------------------------------------|
+| dash_text_size_str(sel)   | **2.5** | size.tiny/small/normal/large döndür   |
+| status_bg(long, short)    | **2.5** | Durum rengi döndür                    |
+| block_bg(reason)          | **2.5** | Blok nedeni rengi döndür              |
+| render_motor_section(...) | 6       | Motor bölümünü table'a yaz            |
+| render_filter_section(...)| 6       | Filtre bölümünü table'a yaz           |
+| render_state_section(...) | 6       | State bölümünü table'a yaz            |
+| render_backtest_section(...)| **6** | **r30: Panel 2 — backtest istatistikleri** |
+
+**NOT:** 2.5 → get_dashboard_bg (SECTION 3) status_bg'yi çağırıyor. Forward ref yasak.
+
+================================================================
+## DOSYA YAPISI (r20)
+================================================================
+
+| SECTION | İÇERİK                    | AÇIKLAMA                                       |
+|---------|---------------------------|------------------------------------------------|
+| 1       | Constants & Inputs        | Panel, motor, filtre, AT Basit ayarları        |
+| 2       | Type Definitions          | Motor, FilterEngine, TradeState, AuditCounters |
+| **2.5** | **Yardımcı Fonksiyonlar** | **status_bg, block_bg, dash_text_size_str**    |
+| 3       | Motor Methods             | calc_*, calculate, get_dashboard_text/bg       |
+| 4       | Filter Methods            | update_filters, check_all_*                    |
+| 5       | State Machine Methods     | is_*, lock, arm, disarm, apply_entry           |
+| 6       | Dashboard Helpers         | render_motor/filter/state_section              |
+| 7       | Main Strategy Logic       | Sinyal chain, order execution                  |
+| 8       | Visualization             | plot, plotshape                                |
+| 9       | Dashboard                 | Table build + render (r30: Panel 1/Panel 2 secimlik) |
+
+================================================================
+## REVİZYON GEÇMİŞİ (KOMPAKT)
+================================================================
+
+### r01-r08 — İlk modüler yapı + Pine v6 hataları
+  - **r01:** Orijinal 1005 satır flat kod → type/method sistemine dönüştürme
+  - **r02-r08:** Tuple return, var declaration, multi-line ternary, nz(bool),
+    mutable parameter, method chain hataları düzeltildi
+  - **Sonuç:** Tüm Pine v6 hataları çözüldü, %0.01 komisyon eklendi
+
+---
+
+### r09 — KRİTİK BUG FIX (REVERSE MANTIK)
+  **1) [KRİTİK] Reverse logic swap fix:**
+     ```pine
+     # ÖNCE (r08 — BOZUK, reverse hiç çalışmıyordu):
+     reverse_long  = state.is_short() and short_primary ...
+     reverse_short = state.is_long()  and long_primary  ...
+     
+     # SONRA (r09 — DOĞRU):
+     reverse_long  = state.is_long()  and short_primary ...
+     reverse_short = state.is_short() and long_primary  ...
+     ```
+     Semantik: reverse_long = "long pozisyondan çıkılıyor"
+     
+  **2) Cooldown configurable input olarak eklendi:**
+     - input.int(0, "Cooldown Bars (cikistan sonra)")
+     - cooldown_ok = ... > cooldown_bars (eski "> 0" yerine)
+     - Default 0 → r08 davranışı korundu
+     
+  **3) AlphaTrend warmup düzeltmesi:**
+     - nz(line[1], 0.0) → nz(line[1], close)
+     - İlk barlarda line=0 problemi giderildi
+     
+  **4) State desync timing açıklaması yorum olarak eklendi**
+
+---
+
+### r10 — Backtest penceresi sabitlendi (5000 bar)
+  - use_backtest_window / backtest_start_time / backtest_end_time input'ları silindi
+  - "6. Backtest" paneli tamamen kaldırıldı
+  - in_backtest_window = bar_index >= (last_bar_index - 4999) olarak sabitlendi
+  - **Versiyon numaralama kuralı devir promptuna eklendi**
+
+---
+
+### r11-r16 — PerformanceTracker denemesi (İPTAL)
+  **r11:** type PerformanceTracker eklendi
+  - Son 400 barda 3 motorun long/short win rate'i hesaplama
+  - Sinyal: motor.long/short_entry_ok rising edge
+  - Win: sinyal barından 1 bar sonra fiyat doğru yönde mi?
+  - Dashboard'a "PERFORMANS (400 BAR)" bölümü eklendi
+  
+  **r12:** CE10290 fix — type field [n] hatası
+  - at_motor.long_entry_ok[1] → önce yerel değişkene al
+  - Pine v6 kuralı #8 eklendi
+  
+  **r13:** CE10173 fix — math.sum float→int cast
+  - math.sum() int field'a doğrudan atanamaz
+  - int(math.sum(...)) ile cast eklendi
+  - Pine v6 kuralı #9 eklendi
+  
+  **r14:** Backtest 4000, dashboard 1500 bara güncellendi
+  
+  **r15:** Her iki pencere 1500/1500 eşitlendi
+  
+  **r16:** PerformanceTracker tamamen kaldırıldı
+  - **NEDEN:** Dashboard "1 bar sonra fiyat doğru mu?" ölçerken
+    strateji "pozisyon boyunca net kar var mı?" ölçüyor.
+    İkisi karşılaştırılamaz — motor seçimi için güvenilir kılavuz değil.
+  - Kod r10 temizliğine döndü (765 satır)
+  - Table satır sayısı 26 → 22 düzeltildi
+
+---
+
+### r17 — Backtest penceresi 4000 bara çıkarıldı
+  - 1500 → 4000 bar (last_bar_index - 3999)
+  - **Mevcut durum:** Backtest 4000 bar, dashboard 4000 bar
+
+---
+
+### r18 — AT BASİT MOD eklendi
+  **1) Yeni alternatif sinyal mekanizması (sadece AT EMA motor için):**
+     - `use_at_simple` input'u eklendi (toggle ile aktif/pasif)
+     - **Hibrit Mod (default):** EMA200 + AT line + AT>EMA200 üçlü koşul
+     - **AT Basit Mod:** Sadece AT line crossover (EMA200 filtresi YOK)
+     
+  **2) AT Basit Mod özellikleri:**
+     - Giriş: `ta.crossover(close, AT line)` — fiyat AT üstüne çıkınca
+     - Çıkış: `ta.crossunder(close, AT line)` — fiyat AT altına inince
+     - Re-entry: `close > exit_price AND close > AT line` — çıkış seviyesi + AT kontrol
+     - Filtreler (MTF/RSI/ADX), kalıcılık, reverse, cooldown → HER İKİ MODDA AYNI
+     
+  **3) Kod değişiklikleri:**
+     - TradeState type'a `at_simple_long/short_exit_price` field eklendi
+     - State method'lara `arm_at_simple_long/short_exit` eklendi
+     - Dashboard'a "MOD" satırı eklendi (HIBRIT / AT BASIT gösterimi)
+     - Table satır sayısı 22 → 23 güncellendi
+     
+  **4) Davranış farkları:**
+     - Hibrit: Trend filtresi güçlü (EMA200 zorunlu), işlem az, kaliteli
+     - AT Basit: Trend filtresi yok, işlem fazla, erken giriş, whipsaw riski
+
+---
+
+### r19 — CE10156 multi-line ternary hataları düzeltildi (6 yer)
+  - `dash_text_size_str` — dış parantez
+  - `status_bg` — dış parantez
+  - `block_bg → block_color` — dış parantez
+  - `entry_long_ok` — tek satıra alındı
+  - `entry_short_ok` — tek satıra alındı
+  - `block_reason_now` — dış parantez
+
+---
+
+### r20 — CE10271 forward reference — SECTION 2.5 eklendi
+  - `status_bg`, `dash_text_size_str`, `block_bg` SECTION 6'dan SECTION 2.5'e taşındı
+
+---
+
+### r21 — CE10271 kalıcı çözüm — inline renk
+  - **SORUN:** r20 SECTION 2.5 düzeltmesi yeterli olmadı, TradingView hâlâ CE10271 verdi.
+  - **KÖK NEDEN:** `get_dashboard_bg` method'u (SECTION 3) içinde `status_bg()` çağrısı
+  - **ÇÖZÜM:** `status_bg()` çağrısı tamamen kaldırıldı, renk hesabı inline yazıldı:
+    ```pine
+    // ÖNCE (r20 — hâlâ sorunlu):
+    status_bg(long_ok, short_ok)
+    // SONRA (r21 — sorunsuz):
+    long_ok ? color.rgb(20, 140, 95) : short_ok ? color.rgb(150, 35, 35) : color.rgb(70, 70, 70)
+    ```
+  - Artık `get_dashboard_bg` method'u hiçbir dış fonksiyon çağırmıyor → forward reference riski sıfır.
+
+---
+
+### r22 — GC Basit ve ST Basit modları eklendi
+  **1) Basit mod genellești:**
+     ```pine
+     # ÖNCE (r21 — sadece AT için):
+     use_at_simple = input.bool(false, "AT BASIT MOD")
+     at_simple_active = use_at_simple and using_atema
+     
+     # SONRA (r22 — 3 motor için):
+     simple_mode = input.string("Kapali", options=["Kapali", "AT Basit", "GC Basit", "ST Basit"])
+     at_simple_active = simple_mode == SIMPLE_AT and using_atema
+     gc_simple_active = simple_mode == SIMPLE_GC and using_gcema
+     st_simple_active = simple_mode == SIMPLE_ST and motor_choice == MOTOR_ST_EMA
+     simple_active = at_simple_active or gc_simple_active or st_simple_active
+     ```
+     
+  **2) TradeState field değişikliği:**
+     - `at_simple_long/short_exit_price` → `simple_long/short_exit_price` (ortak)
+     - `arm_at_simple_long/short_exit` → `arm_simple_long/short_exit` (method)
+     
+  **3) Crossover logic 3 motor için:**
+     - AT Basit: `ta.crossover/under(close, at_line)`
+     - GC Basit: `ta.crossover/under(close, gc_line)`
+     - ST Basit: `ta.crossover/under(close, st_line)`
+     - Re-entry: `close > simple_exit_price AND close > active_motor_line` (3 motor ortak)
+     
+  **4) Dashboard güncelleme:**
+     - MOD satırı: "HIBRIT" / "AT Basit" / "GC Basit" / "ST Basit"
+     - simple_active kontrolü tüm exit/reclaim mantığına eklendi
+
+---
+
+### r23 — 4. MOTOR EKLENDİ: EMA EMA (Saf EMA Crossover)
+  **1) Amaç:**
+     - Hangi EMA periyodu en yüksek karı verir? Test aracı.
+     - Saf trend filtresi olarak izole et (sadece close vs EMA crossover)
+     - Bulunan optimal periyot → `ema_len` (regime EMA) için kullanılır
+     - Bu sayede diğer 3 motor (AT/GC/ST) optimize rejim EMA'sı ile çalışır
+
+  **2) Eklenen constants:**
+     ```pine
+     MOTOR_EMA_EMA = "EMA EMA"
+     SIMPLE_EMA    = "EMA Basit"
+     ```
+
+  **3) Yeni input:**
+     ```pine
+     ema_motor_len = input.int(50, "EMA Motor Periyot", minval=2, group=engine_group)
+     ```
+
+  **4) Motor instance ve hesaplama:**
+     ```pine
+     var ema_motor = Motor.new(MOTOR_EMA_EMA, 0.0, false, false, false, false)
+     ema_motor.line_value := ta.ema(close, ema_motor_len)
+     ema_motor := ema_motor.calculate(close, regime_ema)
+     ```
+
+  **5) using_emaema flag ve 4-yollu seçim:**
+     ```pine
+     using_atema  = motor_choice == MOTOR_AT_EMA
+     using_gcema  = motor_choice == MOTOR_GC_EMA
+     using_stema  = motor_choice == MOTOR_ST_EMA   // r23 YENİ
+     using_emaema = motor_choice == MOTOR_EMA_EMA  // r23 YENİ
+     
+     active_motor_line = (using_atema  ? at_motor.line_value  :
+                          using_gcema  ? gc_motor.line_value  :
+                          using_stema  ? st_motor.line_value  :
+                                         ema_motor.line_value)
+     ```
+
+  **6) EMA Basit crossover:**
+     ```pine
+     ema_cross_up   = ta.crossover(close, ema_motor.line_value)
+     ema_cross_down = ta.crossunder(close, ema_motor.line_value)
+     ema_simple_long_primary  = ema_simple_active and ema_cross_up
+     ema_simple_short_primary = ema_simple_active and ema_cross_down
+     ```
+
+  **7) simple_exit 4 motor için genellesti:**
+     ```pine
+     simple_exit_long  = ... and (at_cross_down or gc_cross_down or st_cross_down or ema_cross_down)
+     simple_exit_short = ... and (at_cross_up   or gc_cross_up   or st_cross_up   or ema_cross_up)
+     ```
+
+  **8) eff_motor (kilitli motor) 4-yollu seçim:**
+     - MOTOR_EMA_EMA case eklendi (line_value, long_hold_ok, short_hold_ok)
+
+  **9) Dashboard güncellemeleri:**
+     - render_motor_section signature: + Motor ema parametresi
+     - "EMA EMA" satırı eklendi (sıralama: AT, GC, ST, EMA)
+     - Tablo boyutu: 23 → 24 satır
+     - render_motor_section çağrısı: + ema_motor argümanı
+
+  **10) Multi-line ternary'ler parantezlendi (CE10156 önleme):**
+     - active_motor_line, active_motor_long_entry, active_motor_short_entry,
+       active_motor_long_hold, active_motor_short_hold
+
+  **11) NOT — EMA Motor Hibrit Mod Davranışı:**  ⚠ r32'DE KONU DISI
+     (r32: Motor 1'den EMA EMA secenegi kaldirildi; rejim zaten EMA. Asagidaki
+      tarihsel notdur — artik hibritte EMA EMA secilemez, sorun olusamaz.)
+     - Hibrit modda calculate() metodu standart 3-koşul uygular:
+       `price > line AND price > ema200 AND line > ema200`
+     - Eğer `ema_motor_len == ema_len` ise: line == regime_ema, 3. koşul her
+       zaman false, hibrit modda işlem açılmaz.
+     - ÖNERİ: Farklı periyotlar kullan (örn. ema_motor_len=50, ema_len=200)
+       → klasik golden cross mantığı oluşur.
+     - VEYA: EMA Motor'u sadece "EMA Basit" modunda kullan, hibrit'i atla.
+
+---
+
+### r24 — MOTOR SECIM MIMARISI YENIDEN DUZENLENDI (mutually exclusive)
+  **1) Sorun (r23 ve oncesi):**
+     - Iki ayri dropdown vardi: motor_choice (AT/GC/ST/EMA) + simple_mode
+       (Kapali/AT Basit/GC Basit/ST Basit/EMA Basit)
+     - Birbirine bagimliydi: `at_simple_active = simple_mode==SIMPLE_AT and using_atema`
+     - "simple_mode=GC Basit ama motor_choice=AT" gibi yanlis eslesme → hicbir
+       sey calismiyordu. Kullanici kafa karistirici buluyordu.
+
+  **2) Cozum — tek karar noktasi:**
+     ```pine
+     # ESKI (r23):
+     motor_choice = input.string(MOTOR_AT_EMA, "Motor", options=[4 motor])
+     simple_mode  = input.string(SIMPLE_OFF, "BASIT MOD", options=[Kapali + 4 basit])
+
+     # YENI (r24):
+     active_mode   = input.string(MODE_M1, "AKTIF MOTOR", options=[MODE_M1, MODE_M2])
+     motor1_choice = input.string(MOTOR_AT_EMA, "Motor 1 Gosterge (Hibrit)", options=[4 motor])
+     motor2_choice = input.string(MOTOR_AT_EMA, "Motor 2 Gosterge (Basit)",  options=[4 motor])
+     ```
+
+  **3) Aktif motor secimi (besleme katmani):**
+     ```pine
+     work_hybrid       = active_mode == MODE_M1
+     work_simple       = active_mode == MODE_M2
+     active_motor_name = work_hybrid ? motor1_choice : motor2_choice
+     using_atema       = active_motor_name == MOTOR_AT_EMA   // ... 4 motor
+     ```
+
+  **4) simple_active sadelesti:**
+     ```pine
+     # ESKI: simple_active = at_simple_active or gc_... or st_... or ema_...
+     # YENI:
+     simple_active     = work_simple
+     at_simple_active  = simple_active and using_atema   // ... 4 motor
+     ```
+
+  **5) KORUNAN MANTIK (degismedi):**
+     - calculate(), crossover (at/gc/st/ema_cross_up/down), simple_exit,
+       eff_motor, reverse, reclaim, filtreler — HEPSI AYNI.
+     - Sadece "hangi motor aktif" kararinin verildigi katman degisti.
+
+  **6) Kaldirilanlar:**
+     - SIMPLE_OFF / SIMPLE_AT / SIMPLE_GC / SIMPLE_ST / SIMPLE_EMA constants
+     - simple_mode input
+     - Dashboard "MOTOR (SECILI)" satiri
+
+  **7) Order comment degisikligi:**
+     - `simple_mode + " EXIT"` → `active_motor_name + " BASIT"`
+
+  **8) Dashboard:**
+     - MOD satiri: "HIBRIT (M1)" / "BASIT (M2)"
+     - YENI "MOTOR 1" satiri: motor1_choice + (aktifse "● AKTIF" yesil vurgu)
+     - YENI "MOTOR 2" satiri: motor2_choice + " Basit" + (aktifse "● AKTIF" mor vurgu)
+     - Tablo: 24 → 25 satir (MOTOR SECILI -1, MOTOR 1 + MOTOR 2 +2)
+
+---
+
+### r25 — MIMARI SAGLAMLASTIRMA: GIRIS MODU KILITLEME (K1)
+  **1) Sorun (r24 ve oncesi):**
+     - locked_motor motor secimini (AT/GC/ST/EMA) kilitliyordu.
+     - AMA mod'u (hibrit/basit) kilitlemiyordu.
+     - Senaryo: Motor 1 (hibrit) ile long acildi → locked_motor="AT EMA".
+       Pozisyon acikken active_mode → Motor 2 (basit) yapilirsa:
+       * motor_stop aniden devre disi (not simple_active → false)
+       * simple_exit devreye girer (crossover bekler)
+       → Pozisyon HIBRIT acilip BASIT kapanir = tutarsizlik.
+     - Backtest'te zararsiz (ayarlar sabit), canli/forward'da gercek risk.
+
+  **2) Cozum — giris modunu kilitle:**
+     ```pine
+     # TradeState type'a yeni field:
+     bool locked_simple   // true=Basit/M2, false=Hibrit/M1
+
+     # apply_entry'ye parametre (giriste mod kilitlenir):
+     method apply_entry(TradeState s, string entry_source, int dir, string motor, bool is_simple) =>
+         s.locked_simple := is_simple
+         ...
+
+     # Efektif mod — pozisyon acikken kilitli, flat iken guncel:
+     eff_simple = in_position ? state.locked_simple : simple_active
+
+     # Exit mantigi eff_simple kullanir (simple_active DEGIL):
+     motor_stop_long  = not eff_simple and ...
+     simple_exit_long = eff_simple and ...
+     ```
+
+  **3) KRITIK AYRIM — neyin kilitlenip neyin kilitlenmedigi:**
+     - EXIT tarafi (motor_stop, simple_exit) → eff_simple (KILITLI mod)
+       Cunku acik pozisyon giris mantigiyla yonetilmeli.
+     - ENTRY tarafi (entry_long/short_ok, primary, reclaim, persistence,
+       re-entry) → guncel simple_active (DEGISMEDI)
+       Cunku flat iken yeni giris guncel moda gore yapilmali.
+     - reverse → guncel mod (degismedi); hem cikis hem giris, giris tarafi
+       guncel mod gerektirir.
+
+  **4) TradeState.new() guncellendi:**
+     - 15 → 16 arguman (son arguman: false = locked_simple baslangic)
+
+  **5) apply_entry cagrilari (4 yer):**
+     - simple_active kilitlenecek mod olarak gecirildi (reversal x2 + flat x2)
+
+  **6) Dashboard:**
+     - KILITLI satiri: locked_motor + mod etiketi
+       "AT EMA (H)" = hibrit kilitli, "GC EMA (B)" = basit kilitli
+     - Sadece pozisyon acikken etiket gosterilir (flat iken "YOK")
+
+  **7) DENETIM NOTU — eff_simple in_position'a bagli:**
+     in_position = state.current != 0 (satir ~614). eff_simple bundan SONRA
+     tanimlanmali (exit conditions bolumunde, satir ~684). Sira onemli.
+
+---
+
+### r26 — MIMARI SAGLAMLASTIRMA: K2 + K3
+  **K2 — EMA Motor hibrit "sessiz olum" gorunur kilindi:**  ⚠ r32'DE GECERSIZ/KALDIRILDI
+     (r32: Motor 1'den EMA EMA secenegi cikti + rejim=EMA oldu => cakisma yapisal olarak
+      imkansiz. ema_hybrid_conflict + bgcolor + dashboard uyarisi tamamen silindi.
+      Asagidaki K2 aciklamasi sadece TARIHSEL referans icindir.)
+     - SORUN: Motor 1 + EMA EMA + (ema_motor_len == ema_len) → line==regime_ema,
+       "line > regime_ema" hep false → hibrit modda HICBIR islem acilmaz.
+       Sebebi panelde gorunmuyordu (sessiz basarisizlik).
+     - COZUM — global bayrak + 2 gorsel uyari:
+       ```pine
+       ema_hybrid_conflict = work_hybrid and using_emaema and (ema_motor_len == ema_len)
+       # 1) Grafik (dashboard kapali olsa bile gorunur):
+       bgcolor(ema_hybrid_conflict ? color.new(color.red, 88) : na)
+       # 2) Dashboard MOTOR 1 satiri:
+       m1_text = motor1_choice + (ema_hybrid_conflict ? "  ⚠EMA=REJIM" : ...)
+       m1_bg   = ema_hybrid_conflict ? kirmizi : ...
+       ```
+     - DAVRANIS DEGISMEDI; sadece durum gorunur. Cozum: farkli periyot kullan
+       (orn. ema_motor_len=50, ema_len=200) VEYA Motor 2 (Basit) modda test et.
+
+  **K3 — config_safe olu kodu kullanildi:**
+     - SORUN: FilterEngine.config_safe hesaplaniyordu (satir ~269) ama hicbir
+       yerde okunmuyordu.
+     - COZUM: render_filter_section'da FILTRE baslik hucresinde gosterildi
+       (eski tekrar eden "DURUM" basligi yerine — SATIR EKLENMEDI):
+       ```pine
+       cfg_text = f.active_count == 0 ? "FILTRESIZ" : f.config_safe ? "GUVENLI" : "⚠ TEK FILTRE"
+       ```
+     - Anlami: tek basina RSI veya tek basina ADX = whipsaw riski (guvensiz).
+       Guvenli kombinasyonlar: filtresiz, MTF+RSI, MTF+ADX.
+
+  **NOT:** Tablo boyutu degismedi (25 satir). Her iki cozum de mevcut hucreleri
+  yeniden degerlendirdi, yeni satir gerektirmedi.
+
+---
+
+### r27 — EXIT TARAFI ASIMETRI DUZELTMELERI: K4 + K5
+  r26 kod denetiminde exit-side mantikta 3 asimetri bulundu. Entry tarafi titizce
+  (motor secimine gore) gatelenmisti ama exit tarafi ayni disipline uymuyordu.
+
+  **K4 [KRITIK — BACKTEST'I ETKILER] — Basit exit kilitli motoru yok sayiyordu:**
+     - SORUN: simple_exit, 4 motorun crossover'ini OR'luyordu:
+       ```pine
+       simple_exit_long = ... and (at_cross_down or gc_cross_down or st_cross_down or ema_cross_down)
+       ```
+       Entry primaryleri *_simple_active ile gatelenmis (sadece SECILI motor girer),
+       ama exit gatelenmemis. Motor 2 = GC ile girip AT/ST/EMA crossunder'inda da
+       cikiliyordu. Ayarlar SABIT olsa bile gecerli => bu bir mod-degisim bugu DEGIL,
+       saf backtest bugu. Basit mod backtest sonuclari KIRLIYDI.
+     - COZUM: eff_cross_up / eff_cross_down — state.locked_motor'a gore TEK motorun
+       crossover'i secilir (hibrit eff_motor_line/eff_long_hold kaliblariyla simetrik):
+       ```pine
+       eff_cross_down = (state.locked_motor == MOTOR_AT_EMA  ? at_cross_down  :
+                         state.locked_motor == MOTOR_GC_EMA  ? gc_cross_down  :
+                         state.locked_motor == MOTOR_ST_EMA  ? st_cross_down  :
+                         state.locked_motor == MOTOR_EMA_EMA ? ema_cross_down :
+                                                               false)
+       simple_exit_long  = eff_simple and confirmed_bar and state.is_long() and eff_cross_down
+       simple_exit_short = eff_simple and confirmed_bar and state.is_short() and eff_cross_up
+       ```
+       Artik secili motorla girilir, AYNI motorun line'inda cikilir.
+     - !! ETKI: r27 sonrasi BASIT MOD backtest sayilari DEGISIR. Eski (r22-r26)
+       basit mod sonuclari GECERSIZ — yeniden alinmali. Hibrit mod etkilenmez.
+
+  **K5 [CANLI/FORWARD] — Reverse, pozisyon-ortasi mod degisiminde siziyordu:**
+     - SORUN: r25 motor_stop/simple_exit'i eff_simple (kilitli mod) ile kilitledi
+       AMA reverse hala short_primary/long_primary uzerinden GUNCEL simple_active'den
+       besleniyordu. Senaryo: hibrit-kilitli long acik, active_mode → basit yapilirsa
+       short_primary basit crossover'la atesleniyor → hibrit pozisyon basit sinyalle
+       ters cevriliyordu. Bu, r25'in kapatmaya calistigi "hibrit acilip basit kapanma"
+       tutarsizliginin REVERSE yoluyla geri sizmasi.
+     - COZUM: mod tutarlilik gate'i:
+       ```pine
+       mode_consistent = simple_active == state.locked_simple
+       reverse_long  = state.is_long()  and short_primary and short_signal_base and mode_consistent
+       reverse_short = state.is_short() and long_primary  and long_signal_base  and mode_consistent
+       ```
+       Mod eslesmiyorsa reverse bastirilir; pozisyon kilitli exit mantigiyla
+       (motor_stop/simple_exit) kapanir, sonraki giris GUNCEL modda yapilir.
+       "Stuck pozisyon" riski yok — kilitli exit yolu her zaman acik.
+     - ETKI: Backtest'te mod sabit => mode_consistent HEP true => reverse DEGISMEZ.
+       Sadece canli/forward'da mod degisimini korur. BACKTEST ETKILENMEZ.
+
+  **#3 (reentry active_motor_line) — DEGISIKLIK YAPILMADI (no-op analizi):**
+     - simple_reentry, close'u active_motor_line ile karsilastiriyor. Ilk bakista
+       eff_motor_line kullanmali gibi gorunuyor.
+     - ANCAK: simple_reentry yalniz FLAT iken order tetikler (long_primary →
+       fire_long_flat → entry_flat_now sarti). Flat iken state.locked_motor="" =>
+       eff_motor_line zaten active_motor_line'a duser. Yani eff'e cevirmek davranisi
+       DEGISTIRMEZ (no-op), ustelik reentry tanimi (satir ~575) eff_motor_line'dan
+       (~634) ONCE geldigi icin forward-ref riski dogurur. Gereksiz churn — birakildi.
+
+  **OLU KOD — block_bg() kaldirildi:**
+     - r19'da block_reason_now inline renge gecince block_bg() islevsiz kalmis,
+       ama tanim duruyordu. r27'de silindi. status_bg() aktif (MTF/RSI/REJIM
+       hucrelerinde kullaniliyor) — o kaldi.
+
+  **NOT:** Tablo boyutu degismedi (25 satir). Pine v6 uyumu: yeni multi-line
+  ternary'ler dis parantezli (kural #5), locked_motor field okumasi [n] icermiyor
+  (kural #8). Satir sayisi 929 → 964 (yorum + eff_cross bloklari).
+
+---
+
+### r28 — DASHBOARD SADELESTIRME (21->16) + K6 MOD UYARISI
+  **AMAC:** Tablo 25 ayrilmis ama sadece 21 dolu satir vardi (4 bos tampon). Panel
+  canli karar verirken sade olsun diye 5 dusuk-onemli icerik satiri cikarildi,
+  table.new 16'ya cekildi (sifir israf).
+
+  **1) Cikarilan 5 satir (operasyonel onem dusuk):**
+     - DURUM/INFO ara-basligi — dekoratif ayrac, sifir veri
+     - BLOK — audit sayaclari (R/P/F debug). audit globali DURUYOR, sayaclar iceride
+       birikmeye devam eder; sadece panelden cikti.
+     - SON GIRIS — grafikteki L/S plotshape'leriyle mukerrer
+     - RECLAIM — nis (yalniz hibrit motor_stop reclaim arm edince anlamli)
+     - KALICILIK — varsayilan use_regime_persistence=false iken sadece "KAPALI"
+       gosteriyordu. hybrid_*_hold_bars sayaclari ICERIDE hesaplanmaya devam eder.
+       !! ONCELIK 2'de persistence kombinasyonu test edilecekse bu satir geri eklenir
+       (3 satir: persist_text + persist_bg + cell).
+
+  **2) KORUNAN — SON CIKIS:** STOP/REV/BASIT cikis nedenini gosterir; K4/K5
+     duzeltmelerini canli/forward'da dogrulamaya yarar (bilinçli tutuldu).
+
+  **3) K6 [GORUNURLUK] — pozisyon-ortasi mod uyumsuzlugu:**
+     - K5 reverse'u MANTIKEN korudu ama kullanici pozisyon acikken active_mode'u
+       degistirdiyse panelde belli olmuyordu (sessiz koruma).
+     - COZUM (satir EKLEMEDEN, mevcut KILITLI hucresi yeniden degerlendirildi):
+       ```pine
+       # main (dashboard blogu):
+       kilit_mode_mismatch = in_position and (simple_active != state.locked_simple)
+       # render_state_section(... bool mode_mismatch):
+       locked_text = (mode_mismatch ? s.locked_motor + locked_mode_tag + " ⚠MOD!" : ...)
+       locked_bg   = mode_mismatch ? kirmizi : ...
+       ```
+     - is_live_mode benzeri GENEL uyari yerine hedefli. NOT: Pine input degisimini
+       ENGELLEYEMEZ, sadece uyarir. barstate.isrealtime de mevcut ama mismatch
+       uyarisi daha operasyonel.
+
+  **4) render_state_section imza degisikligi:**
+     - `(table, int, TradeState s, AuditCounters ac)` → `(table, int, TradeState s, bool mode_mismatch)`
+     - ac yalniz BLOK satirinda kullaniliyordu; BLOK cikinca ac serbest kaldi,
+       yerine mode_mismatch geldi.
+
+  **5) YORUM TEMIZLIGI:** r27'de block_bg() silinmisti ama SECTION 6 basindaki bayat
+     yorum hala onu listeliyordu — guncellendi.
+
+  **LAYOUT (16 satir):** Header · MOD · MOTOR1(K2) · MOTOR2 · REJIM · AT · GC · ST ·
+     EMA · FILTRE(K3) · MTF · RSI · ADX · POZISYON · KILITLI(K6) · SON CIKIS
+
+  **NOT — BACKTEST:** r28 ISLEM MANTIGINA DOKUNMADI. Backtest sayilari r27 ile
+     birebir ayni; bu yalniz goruntu katmani degisikligi. Pine v6 uyumu: K6 ternary
+     dis parantezli (kural #5), kilit_mode_mismatch tanimi render cagrisindan ONCE
+     (forward-ref yok). Satir sayisi 964 → ~950 (5 dashboard satiri + block_bg yorumu).
+
+---
+
+### r29 — GIRDI YENIDEN GRUPLAMA (kozmetik)
+  **SORUN:** ema_len ("EMA200 Length") "3. Filters" grubunda, MTF EMA Length'in
+  hemen altinda duruyordu. Ama bu bir FILTRE degil — grafikteki gri rejim cizgisi,
+  TUM motorlarin (AT/GC/ST/EMA) ortak referansi. Iki "200" (MTF EMA + rejim EMA)
+  yan yana gelince kullanici kafa karisikligi yasadi. Ayrica "1. Hibrit Rejim"
+  grubu, adina ragmen rejimi tanimlayan cizgiyi icermiyordu (yalniz kalicilik vardi).
+
+  **COZUM:** ema_len, "1. Hibrit Rejim" grubunun EN USTUNE tasindi (kalicilik
+  ayarlarinin uzerine). Aciklayici tooltip eklendi (rejim cizgisi <-> MTF EMA farki
+  net yazildi). Filters grubundan cikarildi.
+    ```pine
+    # YENI YER (1. Hibrit Rejim grubu, en ust):
+    ema_len = input.int(200, "EMA200 Length", minval=1, group=regime_group, tooltip="...")
+    use_regime_persistence  = ...
+    regime_persistence_bars = ...
+    ```
+
+  **PANEL YENI DUZENI:**
+    - "1. Hibrit Rejim": EMA200 Length · Hibrit Kalicilik Sarti · Hibrit Kalicilik Bar Sayisi
+    - "3. Filters": MTF EMA Filter · MTF TF · MTF EMA Length · RSI · ADX (ema_len YOK artik)
+
+  **ETKI:** SADECE ayar paneli duzeni degisti. Kod ema_len'i yine
+  `ta.ema(close, ema_len)` (regime_ema) diye okuyor; tanim yukari tasindi ama
+  kullanimdan (regime_ema satiri) once oldugu icin forward-ref yok. BACKTEST
+  SONUCLARI r28/r27 ILE BIREBIR AYNI.
+
+  **!! TradingView NOTU:** Bir girdinin `group`'u degisince TradingView o girdinin
+  grafikteki kayitli degerini varsayilana (200) sifirlayabilir. Script guncellenince
+  EMA200 Length'i kontrol et / tekrar gir. (200'de calisiliyorsa fark etmez.)
+
+  **NOT:** Etiket "EMA200 Length" DEGISMEDI (kullanici onaylamadi + deger-sifirlama
+  riskini artirmamak icin). Ileride "Rejim EMA Periyot" olarak yeniden adlandirilabilir.
+
+---
+
+### r30 — 2. DASHBOARD: BACKTEST PANELI (additive, backtest-notr)
+  **AMAC:** Strategy Tester'i acmadan grafik uzerinde backtest sonuclarini gor.
+  Ozellikle ONCELIK 1 (EMA periyot taramasi) icin ideal: periyodu degistir, Panel 2'ye
+  bak, net kar + win rate kaydet, dongu. strategy.* yalniz in_backtest_window ile
+  gatelenmis gercek islemleri sayar => 4000 barlik pencereyle dogal uyumlu.
+
+  **1) Girdi — "Show Dashboard" bool -> "Dashboard Panel" dropdown:**
+    ```pine
+    dashboard_mode = input.string("Kapali",
+         options=["Kapali", "Panel 1: Durum", "Panel 2: Backtest"], group=display_group)
+    show_dash_1    = dashboard_mode == "Panel 1: Durum"
+    show_dash_2    = dashboard_mode == "Panel 2: Backtest"
+    show_dashboard = show_dash_1 or show_dash_2
+    ```
+    Varsayilan "Kapali" => r29 ile birebir ayni acilis.
+
+  **2) SECTION 6 — render_backtest_section(table, int, bool is_simple) eklendi (12 satir):**
+    BACKTEST(hdr) · MOD · NET KAR · NET KAR % · ISLEM · KAZANAN · KAYBEDEN · WIN RATE ·
+    PROFIT FACTOR · ORT/ISLEM · MAX DD · ACIK ISLEM.
+    - Kaynaklar: strategy.closedtrades/wintrades/losstrades/netprofit/grossprofit/
+      grossloss/max_drawdown/opentrades/initial_capital.
+    - wr = closed>0 ? 100.0*wins/closed : 0 (float bolme; renk >=55 yesil / 45-55 amber / <45 kirmizi)
+    - pf = grossloss>0 ? grossprofit/grossloss : na (renk >=1.5 / 1.0-1.5 / <1.0)
+    - MOD satiri: sonuclarin hangi config'e ait oldugunu kayit altina alir.
+    - FORWARD-REF YOK: yalniz strategy.* + motor1/2_choice(S1) + dash_text_size_str(S2.5).
+      work_simple PARAMETRE (is_simple) olarak gecer (S7 globaline ref yok).
+
+  **3) SECTION 9 — tablo mod-duyarli:**
+    ```pine
+    dash_rows = show_dash_2 ? 12 : 16
+    dash_key  = ... + "|" + dashboard_mode   // panel degisince yeniden kur
+    ```
+    Render dallanir: show_dash_2 -> table.clear(...,11)+render_backtest_section;
+    else -> table.clear(...,15) + r28 durum paneli (AYNEN, dokunulmadi).
+    dash_show_prev kaldirildi (on/off zaten dashboard_mode uzerinden dash_key'de).
+
+  **ETKI:** SADECE goruntu katmani. Panel 1 r29 ile birebir ayni. Backtest sayilari
+  r27/r28/r29 ile DEGISMEDI (strategy.* sadece okunur, hicbir order/state degisikligi yok).
+
+  **PANEL 2 KISITI:** strategy.* tum backtest'i (tek calistirilan mod) ozetler; hibrit
+  vs basit islemleri AYIRAMAZ. Mod karsilastirmasi icin her modu ayri calistir, MOD
+  satirindaki etiketle birlikte sonucu kaydet.
+
+  **Pine v6 uyumu:** wr_bg/pf_bg cok-satirli renk ternary'leri dis parantezli (kural #5);
+  100.0*wins/closed float bolme; method degil free function; type field [n] yok.
+
+  **!! TradingView NOTU:** "Show Dashboard" girdisi kalktigi icin eski grafikte kayitli
+  ayar kaybolur — dropdown'u tekrar ayarla (varsayilan Kapali).
+
+---
+
+### r31 — MIMARI SADELESTIRME (pick() konsolidasyonu; hedef BACKTEST-NOTR)
+  **AMAC:** Anlasilabilirlik. Ayni 4-yollu motor secim terneri ~10 yerde tekrar
+  ediyordu; 5. motor eklemek 10+ yeri elle gezmek demekti. Konsolide edildi.
+
+  **1) pick(string nm) yardimcisi (SECTION 7, motor decl'den sonra):**
+    ```pine
+    pick(string nm) =>
+        out = (nm == MOTOR_AT_EMA ? at_motor : nm == MOTOR_GC_EMA ? gc_motor :
+               nm == MOTOR_ST_EMA ? st_motor : ema_motor)
+        out
+    active = pick(active_motor_name)   // calculate + cross atamasindan SONRA
+    eff    = pick(eff_motor_name)
+    active_motor_line = active.line_value ; eff_cross_down = eff.cross_down ; ...
+    ```
+    Donen motor SADECE OKUNUR (mutasyon yok) => secim r30 ile birebir ayni.
+    DIS PARANTEZ ZORUNLU (kural #5 — cok satirli terner CE10156).
+
+  **2) Motor type + cross_up/cross_down alani.** ta.crossover/under GLOBAL scope'ta
+    KALDI (method icine TASINMADI — her satir ayri call-site, eski 8 global ile birebir
+    ayni ta state'i), sonuc alana yazilir: at_motor.cross_up := ta.crossover(...).
+    Motor.new() 6 -> 8 arguman.
+
+  **3) Basit fan-out collapse:** 4 *_simple_active + 8 *_simple_primary KALDIRILDI:
+    ```pine
+    simple_long_primary  = simple_active and active.cross_up
+    simple_short_primary = simple_active and active.cross_down
+    ```
+    Mutually-exclusive motor => eski 4-yollu OR zaten aktif motorun crossover'ina
+    cokuyordu => birebir ayni.
+
+  **4) Isim:** hybrid_*_hold_bars / hybrid_*_persist_ok -> persist_*_bars / persist_*_ok
+    (hem hibrit hem basitte kullaniliyordu; "hybrid_" oneki yanilticiydi).
+
+  **5) using_atema/gcema/stema/emaema KALDIRILDI** (pick gereksiz kildi).
+    ema_hybrid_conflict artik active_motor_name == MOTOR_EMA_EMA ile inline.
+
+  **LOGIC-EQUIVALENCE KANITLARI:**
+    - pick(eff_motor_name): locked!="" iken kilitli motor; flat/locked=="" iken aktif
+      motor => eski "in_position ? (locked terner) : active" fallback ile birebir ayni.
+    - eff_cross flat iken active'e duser AMA simple_exit is_long/is_short ile gateli
+      => fark MASKELENIR (eski ":false" ile ayni). [eff_cross_up/down = eff.cross_*]
+    - fan-out collapse: mutually-exclusive => OR tek terime cokuyordu.
+    - cross alan atamasi global ta call-site sayisini/sirasini DEGISTIRMEDI.
+
+  **DOGRULAMA PROTOKOLU (YAPILMADI — sonraki is):** r30'da (Hibrit + AT/GC/ST/EMA Basit)
+    Panel 2 net kar/win rate/islem NOT AL -> r31'de ayni config'lerle KARSILASTIR.
+    Birebir ayni => esdeger. Fark => geri al, bisect et.
+
+  **Pine v6 uyumu:** pick ternary dis parantezli (kural #5); cross alanlari [n]
+    icermez (kural #8); ta.* method icinde DEGIL (call-site state riski yok). Forward-ref
+    yok: pick at_motor..ema_motor'dan (decl) sonra, ilk cagri calculate'ten sonra.
+
+  **KAPSAM DISI (bilincli):** Renk sabitleri (COL_*) r32'ye birakildi — saf kozmetik;
+    logic refactor'un diff'ini kucuk/dogrulanabilir tutmak icin ayrildi.
+
+  **Satir:** ~1047 -> ~997 (yorumlara ragmen net -50, konsolidasyon).
+
+---
+
+### r32 — EMA SADELESTIRME (iki EMA periyodu -> tek girdi; HIBRIT LOGIC degisti)
+  **AMAC:** 3 ayri EMA kafa karistiriyordu — ema_len (200, rejim), ema_motor_len (50,
+  EMA EMA motor), mtf_ema_len (MTF filtre). Ilk ikisi ayni isi farkli rolde yapiyordu.
+
+  **1) ema_len (EMA200 Length) KALDIRILDI.** regime_ema = ta.ema(close, ema_motor_len).
+    Tek "EMA Periyot" hem hibrit rejim cizgisini hem Motor 2 EMA EMA sinyalini besler.
+
+  **2) ema_motor_len:** "2. Motor Secimi" -> "1. Hibrit Rejim" grubu; ad "EMA Motor
+    Periyot" -> "EMA Periyot (Rejim + EMA Motor)"; default 50 -> 200.
+
+  **3) motor1_choice (Hibrit) seceneklerinden EMA EMA CIKARILDI.** Rejim zaten EMA =>
+    Motor 1'de EMA EMA dejenere (line==rejim). motor2_choice'da EMA EMA DURUYOR.
+
+  **4) K2 (ema_hybrid_conflict) TAMAMEN KALDIRILDI:** tanim (S7), bgcolor uyarisi (S8),
+    dashboard ⚠EMA=REJIM + kirmizi m1_bg (S9). Cakisma artik yapisal olarak imkansiz.
+
+  **5) Gri cizgi plot + switch board etiketi "EMA200" -> "EMA Rejim".**
+
+  **HIBRIT MANTIK (calculate, degismedi ama artik ema_motor_len besliyor):**
+    long_entry = close>line AND close>EMA AND line>EMA ; long_hold = close>EMA
+    => Bulunan EMA hibritte hem GIRIS KAPISI hem CIKIS cizgisi; AT/GC/ST giris onayi ekler.
+
+  **BACKTEST ETKISI:** Hibrit logic ema_motor_len'e baglandi. Default 200 => HIBRIT
+    DEFAULT r31 ILE AYNI. Periyot degisince hibrit degisir (beklenen). Basit etkilenmez.
+    Davranissal kaldirma: motor1=EMA EMA (default degildi).
+
+  **Pine v6:** Saf girdi/atama degisikligi; yeni terner/method yok. Forward-ref yok
+    (ema_motor_len SECTION 1, kullanim SECTION 7). pick() 4 motoru tutmaya devam
+    (motor2 EMA EMA icin); ema_motor instance + dashboard EMA EMA satiri DURUYOR.
+
+  **!! TradingView NOTU:** EMA200 Length kalkti; ema_motor_len grup/ad/default degisti
+    => kayitli degerler sifirlanabilir, "EMA Periyot" ve motor1 gostergesini kontrol et.
+
+  **Satir:** ~997 -> ~987.
+
+================================================================
+## VERSİYON NUMARALAMA KURALI
+================================================================
+
+Her değişiklikten sonra dosya adı ve strateji başlığındaki revizyon numarası artırılır.
+
+**Dosya adı:**      OZK_3Motor_v2_7_Mod_rXX.pine
+**Strateji başlığı:** "OZK Lean Modular System v2.7 rXX (Modular)"
+**shorttitle:**       "OZK v2.7 MOD rXX"
+
+**Kural:** XX = bir önceki rNN + 1 (örn. r21 → r22)
+
+Bu kural **istisnasız** uygulanır — tek satır değişikliklerinde bile numara artırılır.
+
+================================================================
+## AÇIK KONULAR / SONRAKİ ADIMLAR
+================================================================
+
+### ✅ TAMAMLANDI
+- r09 reverse logic fix
+- r17 backtest penceresi 4000 bar
+- r18 AT Basit Mod eklendi
+- r19 CE10156 multi-line ternary hataları (6 yer)
+- r20 CE10271 SECTION 2.5 eklendi (kısmi çözüm)
+- r21 CE10271 kalıcı çözüm — get_dashboard_bg inline renk
+- r22 GC Basit ve ST Basit modları eklendi — 3 motor crossover takip
+- r23 4. MOTOR EKLENDİ: EMA EMA + EMA Basit mod
+- r24 Motor secim mimarisi yeniden duzenlendi (active_mode, mutually exclusive)
+- r25 Mimari saglamlastirma: giris modu kilitleme (K1)
+- r26 Mimari saglamlastirma: K2 (EMA hibrit gorunurluk) + K3 (config_safe)
+- **r27 Exit tarafi asimetri: K4 (basit exit kilitli motor) + K5 (reverse mod gate) + block_bg temizligi**
+- **r28 Dashboard sadelestirme (21->16 satir) + K6 (mod uyumsuzlugu gorunurlugu)**
+- **r29 Girdi yeniden gruplama (rejim EMA -> "Hibrit Rejim" grubu) [KOZMETIK]**
+- **r30 2. Dashboard: Backtest paneli (Panel 1/Panel 2 secimlik) [ADDITIVE, BACKTEST-NOTR]**
+- **r31 Mimari sadelestirme: pick() konsolidasyonu + cross alanlari + fan-out collapse + persist_* [HEDEF BACKTEST-NOTR, DOGRULAMA BEKLIYOR]**
+- **r32 EMA sadelestirme: rejim + EMA motor tek girdide (ema_motor_len, def 200); motor1'den EMA EMA + K2 kaldirildi [HIBRIT LOGIC; default 200 => r31 ile ayni]**
+- PerformanceTracker denendi ve iptal edildi
+
+---
+
+### 🎯 ONCELIK 0 — SAGLAMLASTIRMA DURUMU
+Mimari denetimde bulunan 6 kirilganlik/gorunurluk acigi COZULDU:
+- ✅ K1 (r25): pozisyon ortasi mod degisimi → giris modu kilitleme
+- ✅ K2 (r26): EMA Motor hibrit "sessiz olum" → gorsel uyarilar
+- ✅ K3 (r26): config_safe olu kod → dashboard'da gosterildi
+- ✅ K4 (r27): basit exit 4-motor OR → eff_cross ile kilitli motora baglandi [BACKTEST FIX]
+- ✅ K5 (r27): reverse pozisyon-ortasi mod sizintisi → mode_consistent gate
+- ✅ K6 (r28): mod uyumsuzlugu sessiz koruma → KILITLI satirinda "⚠MOD!" uyarisi
+
+Entry/exit simetrisi tam, mod kilidi hem mantik (K5) hem gorunurluk (K6) tarafinda
+kapali. Mimari stabil. Dashboard 16 satirda sade.
+
+!! r27 SONRASI YAPILACAK: Basit mod backtestleri YENIDEN al (K4 eski sayilari
+gecersiz kildi). Hibrit mod sonuclari hala gecerli. (r28 backtest'i etkilemez.)
+
+---
+
+### 🎯 ÖNCELİK 1b — r31 MIMARI SADELESTIRME ✅ YAPILDI (dogrulama bekliyor)
+pick() konsolidasyonu + Motor cross alanlari + basit fan-out collapse + persist_*
+rename TAMAMLANDI (bkz. REVIZYON GECMISI r31). Logic-equivalent hedeflendi.
+KALAN: TradingView'da r30 vs r31 backtest karsilastirmasi (DOGRULAMA PROTOKOLU).
+
+### 🎯 ÖNCELİK 1c — r32 RENK SABITLERI (saf kozmetik, opsiyonel)
+r31'den bilincli ayrildi. color.rgb(...) degerleri onlarca yerde tekrar ediyor.
+SECTION 1'de palet tanimla, govdede COL_* kullan:
+  COL_LONG (20,140,95) · COL_SHORT (150,35,35) · COL_NEUTRAL (70,70,70) ·
+  COL_LABEL (46,54,66) · COL_HDR (18,24,32) · COL_SIMPLE (100,100,200) ·
+  COL_HYBRID (60,90,140) · COL_WARN (170,110,20) · COL_FADE (55,55,55) ·
+  COL_ALERT (180,60,60) · COL_LOCK (100,100,140) · COL_DD (120,60,60)
+NOT: get_dashboard_bg const COLOR kullanabilir (status_bg gibi FONKSIYON cagirmaz —
+r21 forward-ref kurali sadece fonksiyon cagrisi icin). 100% backtest-notr (renk).
+URETIM: defleri sed-sweep SONRASI ekle (govde COL_* olur, defler ham color.rgb kalir).
+
+---
+
+### 🎯 ÖNCELİK 1 — EMA Motor ile Optimal EMA Periyot Bulma
+**Hedef:** Maksimum kar veren EMA periyodunu tespit et.
+
+**Test prosedürü (r32 — TEK girdi):**
+1. Aktif Motor: "Motor 2 (Basit)" seç
+2. Motor 2 Gosterge: "EMA EMA"
+3. Filtreler kapali (Panel'de FILTRESIZ), Hibrit Kalicilik kapali — saf crossover icin
+4. "EMA Periyot (Rejim + EMA Motor)" input'unu degistir: 20, 50, 100, 150, 200, 250...
+5. Her deger icin Panel 2'den kaydet (Net Kar, Win Rate, Islem, Max DD)
+6. Maksimum kari veren periyot = optimal deger
+
+**Sonra (r32):** Bulunan deger ZATEN ayni girdide. Aktif Motor'u "Motor 1 (Hibrit)"e
+al; "EMA Periyot" otomatik rejim cizgisi olur. AT/GC/ST giris onayi ekler, cikis =
+close EMA'yi kesince. (Eski "EMA200 Length"e elle kopyalama ADIMI ARTIK YOK.)
+
+!! DIKKAT: Basit testteki "en karli EMA" = o EMA'nin TEK BASINA tetikleyici olarak
+en iyisi. Hibritte ayni EMA rejim/cikis filtresi rolu oynar (farkli is). Cogu zaman
+iyi ortusur ama garanti degil — istersen hibritte de periyodu kisa bir sweep et.
+
+---
+
+### 🎯 ÖNCELİK 2 — Basit Mod Test & İyileştirme
+**Backtest karşılaştırması:**
+- Hibrit mod vs AT/GC/ST/EMA Basit — aynı dönem, aynı filtreler
+- Her motor için basit mod performansı
+- İşlem sayısı, getiri, max drawdown, win rate karşılaştırması
+- Whipsaw riski analizi (ADX filtresi aktif/pasif)
+
+**Önerilen test kombinasyonları:**
+1. AT/GC/ST/EMA Basit + ADX > 25 (güçlü trend saatlerinde)
+2. AT/GC/ST/EMA Basit + Kalıcılık 3 bar (geçici sinyal gürültüsü filtresi)
+3. AT/GC/ST/EMA Basit + Cooldown 5 bar (ardışık işlem engelleme)
+4. Motor karşılaştırma: AT vs GC vs ST vs EMA — hangisi basit modda daha iyi?
+
+---
+
+### 🎯 ÖNCELİK 3 — Özellik Geliştirme
+**TP / Trailing SL (strategy.exit ile):**
+- ATR-based TP seviyesi
+- Trailing stop mekanizması
+- motor_stop ile çakışmaması için exit_priority mantığı
+
+**LOT / TL dinamik seçimi:**
+```pine
+qty_mode = input.string("LOT", options=["LOT","TL"])
+final_qty = qty_mode == "LOT" ? qty_val : math.floor(qty_val / close)
+```
+
+**Performance metrikler (dashboard):** ✅ r30 ile YAPILDI (Panel 2 — Backtest).
+- strategy.netprofit, wintrades, losstrades, closedtrades, opentrades ✅
+- win_rate, profit_factor, ort/islem, max_drawdown ✅
+- render_backtest_section (SECTION 6) + dashboard_mode dropdown (SECTION 1)
+- KALAN fikir: max_drawdown % (su an DD para biriminde), equity sparkline
+
+---
+
+### 🎯 ÖNCELİK 4 — İndikatör Versiyonu
+**alert() ile Osmanlı Yatırım webhook:**
+- fire_long/short_flat + reverse'lar + motor_stop/simple_exit alarma bağlı
+- Osmanlı 4-koşul yapısına eşleme:
+  * Sıfırdan AL (2 lot) — fire_long_flat
+  * Sıfırdan SAT (2 lot) — fire_short_flat
+  * Ters AL (4 lot) — fire_long_reversal
+  * Ters SAT (4 lot) — fire_short_reversal
+  * Long SL (2 lot) — motor_stop_long (Hibrit) veya simple_exit_long (Basit mod)
+  * Short SL (2 lot) — motor_stop_short (Hibrit) veya simple_exit_short (Basit mod)
+
+---
+
+### 💡 DÜŞÜNÜLMELİ
+- Multi-timeframe motor confirmation (HTF trend + LTF entry)
+- Dynamic lot sizing (volatilite bazlı)
+- Session filter (Tokyo/London/New York)
+- Max daily loss / max daily trades limiti
+- Basit mod kombinasyonları (farklı motorlar farklı timeframe'lerde)
+
+================================================================
+## NOTLAR
+================================================================
+
+**State desync timing:**
+- strategy.entry/close çağrısı mevcut barda gerçekleşir
+- strategy.position_size güncellenmesi bir sonraki bara ertelenir
+- Bu nedenle state.current manuel olarak yönetilir (senkron tutmak için)
+
+**Backtest penceresi:**
+- Dashboard her zaman 4000 bar görüntüler
+- Backtest de 4000 bar çalışır (eşit)
+- Son 4000 bar = yaklaşık 2-3 aylık 5 dakikalık data
+
+**Motor seçimi:**
+- AlphaTrend (AT): Momentum-based, RSI ile filtreleme
+- G-Channel (GC): Range-based, midband crossover
+- SuperTrend (ST): Volatilite-based, ATR ile filtreleme
+
+**Hibrit rejim:**
+- EMA200 + Motor line + Price üçlü koşul
+- Her motor kendi line'ını hesaplar
+- EMA200 global trend filtresi olarak davranır
+
+================================================================
